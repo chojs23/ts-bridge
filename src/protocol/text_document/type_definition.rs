@@ -35,10 +35,11 @@ pub fn handle(params: GotoDefinitionParams) -> RequestSpec {
         payload: request,
         priority: Priority::Normal,
         on_response: Some(adapt_type_definition),
+        response_context: None,
     }
 }
 
-fn adapt_type_definition(payload: &Value) -> Result<Value> {
+fn adapt_type_definition(payload: &Value, _context: Option<&Value>) -> Result<Value> {
     let body = payload
         .get("body")
         .context("tsserver typeDefinition missing body")?;

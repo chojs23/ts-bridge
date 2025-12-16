@@ -40,10 +40,11 @@ pub fn handle(params: ReferenceParams) -> RequestSpec {
         payload: request,
         priority: Priority::Normal,
         on_response: Some(adapt_references),
+        response_context: None,
     }
 }
 
-fn adapt_references(payload: &Value) -> Result<Value> {
+fn adapt_references(payload: &Value, _context: Option<&Value>) -> Result<Value> {
     let refs = payload
         .get("body")
         .context("tsserver references missing body")?

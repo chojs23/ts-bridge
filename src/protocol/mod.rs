@@ -14,7 +14,7 @@ use crate::rpc::{Priority, Route};
 pub mod diagnostics;
 pub mod text_document;
 
-pub type ResponseAdapter = fn(&Value) -> anyhow::Result<Value>;
+pub type ResponseAdapter = fn(&Value, Option<&Value>) -> anyhow::Result<Value>;
 
 #[derive(Debug)]
 pub struct RequestSpec {
@@ -22,6 +22,7 @@ pub struct RequestSpec {
     pub payload: Value,
     pub priority: Priority,
     pub on_response: Option<ResponseAdapter>,
+    pub response_context: Option<Value>,
 }
 
 #[derive(Debug)]
@@ -41,10 +42,18 @@ pub fn route_request(method: &str, params: Value) -> Option<RequestSpec> {
             let params: lsp_types::CompletionParams = serde_json::from_value(params).ok()?;
             Some(text_document::completion::handle(params))
         }
+        lsp_types::request::ResolveCompletionItem::METHOD => {
+            let item: lsp_types::CompletionItem = serde_json::from_value(params).ok()?;
+            text_document::completion_resolve::handle(item)
+        }
         lsp_types::request::GotoDefinition::METHOD => {
             let params: text_document::definition::DefinitionParams =
                 serde_json::from_value(params).ok()?;
             Some(text_document::definition::handle(params))
+        }
+        lsp_types::request::SignatureHelpRequest::METHOD => {
+            let params: lsp_types::SignatureHelpParams = serde_json::from_value(params).ok()?;
+            Some(text_document::signature_help::handle(params))
         }
         lsp_types::request::References::METHOD => {
             let params: lsp_types::ReferenceParams = serde_json::from_value(params).ok()?;

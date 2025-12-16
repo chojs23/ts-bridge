@@ -24,5 +24,6 @@ pub fn handle(params: DidOpenTextDocumentParams, workspace_root: &Path) -> Reque
         payload: request,
         priority: Priority::Const,
         on_response: None,
+        response_context: None,
     }
 }

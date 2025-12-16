@@ -11,7 +11,7 @@
 use anyhow::{Context, Result};
 use lsp_types::{
     CompletionItem, CompletionItemTag, CompletionList, CompletionParams, CompletionResponse,
-    CompletionTextEdit, InsertTextFormat, TextEdit,
+    CompletionTextEdit, InsertTextFormat, Position, TextEdit,
 };
 use serde_json::{Value, json};
 
@@ -72,10 +72,32 @@ pub fn handle(params: CompletionParams) -> RequestSpec {
         payload: request,
         priority: Priority::Normal,
         on_response: Some(adapt_completion),
+        response_context: Some(json!({
+            "file": file_name,
+            "position": {
+                "line": position.line,
+                "character": position.character,
+            }
+        })),
     }
 }
 
-fn adapt_completion(payload: &Value) -> Result<Value> {
+fn adapt_completion(payload: &Value, context: Option<&Value>) -> Result<Value> {
+    let ctx = context.context("completion context missing")?;
+    let file = ctx
+        .get("file")
+        .and_then(|v| v.as_str())
+        .context("completion context missing file")?;
+    let position: Position = ctx
+        .get("position")
+        .cloned()
+        .map(|value| serde_json::from_value(value))
+        .transpose()?
+        .unwrap_or(Position {
+            line: 0,
+            character: 0,
+        });
+
     let body = payload
         .get("body")
         .context("tsserver completion missing body")?;
@@ -91,7 +113,7 @@ fn adapt_completion(payload: &Value) -> Result<Value> {
 
     let mut items = Vec::with_capacity(entries.len());
     for entry in entries {
-        if let Some(item) = convert_entry(&entry) {
+        if let Some(item) = convert_entry(&entry, file, &position) {
             items.push(item);
         }
     }
@@ -103,7 +125,7 @@ fn adapt_completion(payload: &Value) -> Result<Value> {
     Ok(serde_json::to_value(CompletionResponse::List(list))?)
 }
 
-fn convert_entry(entry: &Value) -> Option<CompletionItem> {
+fn convert_entry(entry: &Value, file: &str, position: &Position) -> Option<CompletionItem> {
     let name = entry.get("name")?.as_str()?.to_string();
     let mut label = name.clone();
     let kind_modifiers = entry.get("kindModifiers").and_then(|v| v.as_str());
@@ -172,6 +194,15 @@ fn convert_entry(entry: &Value) -> Option<CompletionItem> {
         item.sort_text = Some(format!("\u{FFFF}{}", sort));
     }
 
+    item.data = Some(json!({
+        "file": file,
+        "position": {
+            "line": position.line,
+            "character": position.character,
+        },
+        "entryNames": [build_entry_name(entry, &name)],
+    }));
+
     Some(item)
 }
 
@@ -185,4 +216,16 @@ fn is_optional(modifiers: Option<&str>) -> bool {
     modifiers
         .map(|mods| mods.contains("optional"))
         .unwrap_or(false)
+}
+
+fn build_entry_name(entry: &Value, name: &str) -> Value {
+    let mut map = serde_json::Map::new();
+    map.insert("name".to_string(), json!(name));
+    if let Some(source) = entry.get("source") {
+        map.insert("source".to_string(), source.clone());
+    }
+    if let Some(data) = entry.get("data") {
+        map.insert("data".to_string(), data.clone());
+    }
+    Value::Object(map)
 }

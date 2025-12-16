@@ -35,10 +35,11 @@ pub fn handle(params: lsp_types::HoverParams) -> RequestSpec {
         payload: request,
         priority: Priority::Normal,
         on_response: Some(adapt_quickinfo),
+        response_context: None,
     }
 }
 
-fn adapt_quickinfo(payload: &Value) -> Result<Value> {
+fn adapt_quickinfo(payload: &Value, _context: Option<&Value>) -> Result<Value> {
     let body = payload
         .get("body")
         .context("tsserver quickinfo missing body")?;

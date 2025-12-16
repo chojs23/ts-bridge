@@ -64,10 +64,11 @@ pub fn handle(params: DefinitionParams) -> RequestSpec {
         payload: request,
         priority: Priority::Normal,
         on_response: Some(adapt_definition),
+        response_context: None,
     }
 }
 
-fn adapt_definition(payload: &Value) -> Result<Value> {
+fn adapt_definition(payload: &Value, _context: Option<&Value>) -> Result<Value> {
     let command = payload
         .get("command")
         .and_then(|cmd| cmd.as_str())

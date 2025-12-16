@@ -1,15 +1,18 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::Context;
+use crossbeam_channel::RecvTimeoutError;
 use lsp_server::{
     Connection, ErrorCode, Message, Notification as ServerNotification, Request, RequestId,
     Response,
 };
 use lsp_types::{
     CompletionOptions, HoverProviderCapability, InitializeParams, InitializeResult, OneOf,
-    PublishDiagnosticsParams, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TypeDefinitionProviderCapability,
+    PublishDiagnosticsParams, ServerCapabilities, SignatureHelpOptions, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions,
+    TypeDefinitionProviderCapability,
     notification::{
         DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument,
         Notification as LspNotification, PublishDiagnostics,
@@ -20,6 +23,7 @@ use serde_json::{self, Value};
 use crate::config::{Config, PluginSettings};
 use crate::process::ServerKind;
 use crate::protocol::text_document::completion::TRIGGER_CHARACTERS;
+use crate::protocol::text_document::signature_help::TRIGGER_CHARACTERS as SIG_HELP_TRIGGER_CHARACTERS;
 use crate::protocol::{self, ResponseAdapter};
 use crate::provider::Provider;
 use crate::rpc::{DispatchReceipt, Service};
@@ -71,9 +75,19 @@ fn advertised_capabilities() -> ServerCapabilities {
         )),
     };
     let completion_provider = CompletionOptions {
-        resolve_provider: Some(false),
+        resolve_provider: Some(true),
         trigger_characters: Some(TRIGGER_CHARACTERS.iter().map(|ch| ch.to_string()).collect()),
         ..CompletionOptions::default()
+    };
+    let signature_help_provider = SignatureHelpOptions {
+        trigger_characters: Some(
+            SIG_HELP_TRIGGER_CHARACTERS
+                .iter()
+                .map(|ch| ch.to_string())
+                .collect(),
+        ),
+        retrigger_characters: Some(vec![",".into(), ")".into()]),
+        ..SignatureHelpOptions::default()
     };
     ServerCapabilities {
         hover_provider: Some(HoverProviderCapability::Simple(true)),
@@ -81,6 +95,7 @@ fn advertised_capabilities() -> ServerCapabilities {
         references_provider: Some(OneOf::Left(true)),
         type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
         completion_provider: Some(completion_provider),
+        signature_help_provider: Some(signature_help_provider),
         text_document_sync: Some(TextDocumentSyncCapability::Options(text_sync)),
         ..Default::default()
     }
@@ -102,87 +117,101 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
 
     let mut pending = PendingRequests::default();
 
-    for message in &connection.receiver {
-        match message {
-            Message::Request(req) => {
-                if handle_request(&connection, &mut service, &mut pending, req)? {
-                    break;
-                }
-            }
-            Message::Response(resp) => {
-                log::debug!("ignoring stray response: {:?}", resp);
-            }
-            Message::Notification(notif) => {
-                if notif.method == "exit" {
-                    break;
-                }
-                if notif.method == DidOpenTextDocument::METHOD {
-                    let params: crate::types::DidOpenTextDocumentParams =
-                        serde_json::from_value(notif.params)?;
-                    let spec = crate::protocol::text_document::did_open::handle(
-                        params,
-                        service.workspace_root(),
-                    );
-                    if let Err(err) =
-                        service.dispatch_request(spec.route, spec.payload, spec.priority)
-                    {
-                        log::warn!("failed to dispatch didOpen: {err}");
-                    }
-                    continue;
-                }
-                if notif.method == DidChangeTextDocument::METHOD {
-                    let params: crate::types::DidChangeTextDocumentParams =
-                        serde_json::from_value(notif.params)?;
-                    let spec = crate::protocol::text_document::did_change::handle(
-                        params,
-                        service.workspace_root(),
-                    );
-                    if let Err(err) =
-                        service.dispatch_request(spec.route, spec.payload, spec.priority)
-                    {
-                        log::warn!("failed to dispatch didChange: {err}");
-                    }
-                    continue;
-                }
-                if notif.method == DidCloseTextDocument::METHOD {
-                    let params: crate::types::DidCloseTextDocumentParams =
-                        serde_json::from_value(notif.params)?;
-                    let spec = crate::protocol::text_document::did_close::handle(
-                        params,
-                        service.workspace_root(),
-                    );
-                    if let Err(err) =
-                        service.dispatch_request(spec.route, spec.payload, spec.priority)
-                    {
-                        log::warn!("failed to dispatch didClose: {err}");
-                    }
-                    continue;
-                }
-                if let Some(spec) =
-                    protocol::route_notification(&notif.method, notif.params.clone())
-                {
-                    if let Err(err) =
-                        service.dispatch_request(spec.route, spec.payload, spec.priority)
-                    {
-                        log::warn!("failed to dispatch notification {}: {err}", notif.method);
-                    }
-                } else {
-                    log::debug!("notification {} ignored", notif.method);
-                }
-            }
-        }
+    let poll_interval = Duration::from_millis(10);
+    loop {
+        drain_tsserver(&connection, &mut service, &mut pending)?;
 
-        for event in service.poll_responses() {
-            if let Some(params) = protocol::diagnostics::from_tsserver_event(&event.payload) {
-                publish_diagnostics(&connection, params)?;
-            } else if let Some(response) = pending.resolve(event.server, &event.payload)? {
-                connection.sender.send(response.into())?;
-            } else {
-                log::trace!("tsserver {:?} -> {}", event.server, event.payload);
-            }
+        match connection.receiver.recv_timeout(poll_interval) {
+            Ok(message) => match message {
+                Message::Request(req) => {
+                    if handle_request(&connection, &mut service, &mut pending, req)? {
+                        break;
+                    }
+                }
+                Message::Response(resp) => {
+                    log::debug!("ignoring stray response: {:?}", resp);
+                }
+                Message::Notification(notif) => {
+                    if notif.method == "exit" {
+                        break;
+                    }
+                    if notif.method == DidOpenTextDocument::METHOD {
+                        let params: crate::types::DidOpenTextDocumentParams =
+                            serde_json::from_value(notif.params)?;
+                        let spec = crate::protocol::text_document::did_open::handle(
+                            params,
+                            service.workspace_root(),
+                        );
+                        if let Err(err) =
+                            service.dispatch_request(spec.route, spec.payload, spec.priority)
+                        {
+                            log::warn!("failed to dispatch didOpen: {err}");
+                        }
+                        continue;
+                    }
+                    if notif.method == DidChangeTextDocument::METHOD {
+                        let params: crate::types::DidChangeTextDocumentParams =
+                            serde_json::from_value(notif.params)?;
+                        let spec = crate::protocol::text_document::did_change::handle(
+                            params,
+                            service.workspace_root(),
+                        );
+                        if let Err(err) =
+                            service.dispatch_request(spec.route, spec.payload, spec.priority)
+                        {
+                            log::warn!("failed to dispatch didChange: {err}");
+                        }
+                        continue;
+                    }
+                    if notif.method == DidCloseTextDocument::METHOD {
+                        let params: crate::types::DidCloseTextDocumentParams =
+                            serde_json::from_value(notif.params)?;
+                        let spec = crate::protocol::text_document::did_close::handle(
+                            params,
+                            service.workspace_root(),
+                        );
+                        if let Err(err) =
+                            service.dispatch_request(spec.route, spec.payload, spec.priority)
+                        {
+                            log::warn!("failed to dispatch didClose: {err}");
+                        }
+                        continue;
+                    }
+                    if let Some(spec) =
+                        protocol::route_notification(&notif.method, notif.params.clone())
+                    {
+                        if let Err(err) =
+                            service.dispatch_request(spec.route, spec.payload, spec.priority)
+                        {
+                            log::warn!("failed to dispatch notification {}: {err}", notif.method);
+                        }
+                    } else {
+                        log::debug!("notification {} ignored", notif.method);
+                    }
+                }
+            },
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => break,
         }
     }
 
+    Ok(())
+}
+
+fn drain_tsserver(
+    connection: &Connection,
+    service: &mut Service,
+    pending: &mut PendingRequests,
+) -> anyhow::Result<()> {
+    for event in service.poll_responses() {
+        if let Some(params) = protocol::diagnostics::from_tsserver_event(&event.payload) {
+            publish_diagnostics(connection, params)?;
+        } else if let Some(response) = pending.resolve(event.server, &event.payload)? {
+            connection.sender.send(response.into())?;
+        } else {
+            log::trace!("tsserver {:?} -> {}", event.server, event.payload);
+        }
+    }
     Ok(())
 }
 
@@ -235,7 +264,7 @@ fn handle_request(
                         );
                         connection.sender.send(response.into())?;
                     } else {
-                        pending.track(&receipts, id, adapter);
+                        pending.track(&receipts, id, adapter, spec.response_context);
                     }
                 } else {
                     let response = Response::new_err(
@@ -274,7 +303,13 @@ struct PendingRequests {
 }
 
 impl PendingRequests {
-    fn track(&mut self, receipts: &[DispatchReceipt], id: RequestId, adapter: ResponseAdapter) {
+    fn track(
+        &mut self,
+        receipts: &[DispatchReceipt],
+        id: RequestId,
+        adapter: ResponseAdapter,
+        context: Option<Value>,
+    ) {
         for receipt in receipts {
             self.entries.insert(
                 PendingKey {
@@ -284,6 +319,7 @@ impl PendingRequests {
                 PendingEntry {
                     id: id.clone(),
                     adapter,
+                    context: context.clone(),
                 },
             );
         }
@@ -318,7 +354,7 @@ impl PendingRequests {
             .unwrap_or(false);
 
         if success {
-            match (entry.adapter)(payload) {
+            match (entry.adapter)(payload, entry.context.as_ref()) {
                 Ok(result) => Ok(Some(Response::new_ok(entry.id, result))),
                 Err(err) => Ok(Some(Response::new_err(
                     entry.id,
@@ -349,4 +385,5 @@ struct PendingKey {
 struct PendingEntry {
     id: RequestId,
     adapter: ResponseAdapter,
+    context: Option<Value>,
 }
