@@ -10,6 +10,7 @@ use serde_json::Value;
 
 use crate::rpc::{Priority, Route};
 
+pub mod diagnostics;
 pub mod text_document;
 
 #[derive(Debug)]

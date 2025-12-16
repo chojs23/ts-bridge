@@ -1,12 +1,17 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use lsp_server::{Connection, ErrorCode, Message, Request, Response};
-use lsp_types::{
-    InitializeParams, InitializeResult, ServerCapabilities,
-    notification::{DidChangeTextDocument, DidOpenTextDocument, Notification},
+use lsp_server::{
+    Connection, ErrorCode, Message, Notification as ServerNotification, Request, Response,
 };
-use serde_json::Value;
+use lsp_types::{
+    InitializeParams, InitializeResult, PublishDiagnosticsParams, ServerCapabilities,
+    notification::{
+        DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument,
+        Notification as LspNotification, PublishDiagnostics,
+    },
+};
+use serde_json::{self, Value};
 
 use crate::config::{Config, PluginSettings};
 use crate::protocol;
@@ -105,6 +110,17 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
                     }
                     continue;
                 }
+                if notif.method == DidCloseTextDocument::METHOD {
+                    let params: crate::types::DidCloseTextDocumentParams =
+                        serde_json::from_value(notif.params)?;
+                    let spec = crate::protocol::text_document::did_close::handle(params);
+                    if let Err(err) =
+                        service.dispatch_request(spec.route, spec.payload, spec.priority)
+                    {
+                        log::warn!("failed to dispatch didClose: {err}");
+                    }
+                    continue;
+                }
                 if let Some(spec) =
                     protocol::route_notification(&notif.method, notif.params.clone())
                 {
@@ -120,10 +136,26 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
         }
 
         for event in service.poll_responses() {
-            log::trace!("tsserver {:?} -> {}", event.server, event.payload);
+            if let Some(params) = protocol::diagnostics::from_tsserver_event(&event.payload) {
+                publish_diagnostics(&connection, params)?;
+            } else {
+                log::trace!("tsserver {:?} -> {}", event.server, event.payload);
+            }
         }
     }
 
+    Ok(())
+}
+
+fn publish_diagnostics(
+    connection: &Connection,
+    params: PublishDiagnosticsParams,
+) -> anyhow::Result<()> {
+    let notif = ServerNotification::new(
+        PublishDiagnostics::METHOD.to_string(),
+        serde_json::to_value(params)?,
+    );
+    connection.sender.send(Message::Notification(notif))?;
     Ok(())
 }
 
