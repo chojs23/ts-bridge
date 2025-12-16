@@ -7,7 +7,7 @@ use lsp_server::{
     Response,
 };
 use lsp_types::{
-    HoverProviderCapability, InitializeParams, InitializeResult, PublishDiagnosticsParams,
+    HoverProviderCapability, InitializeParams, InitializeResult, OneOf, PublishDiagnosticsParams,
     ServerCapabilities,
     notification::{
         DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument,
@@ -61,6 +61,7 @@ pub fn run_stdio_server() -> anyhow::Result<()> {
 fn advertised_capabilities() -> ServerCapabilities {
     ServerCapabilities {
         hover_provider: Some(HoverProviderCapability::Simple(true)),
+        definition_provider: Some(OneOf::Left(true)),
         ..Default::default()
     }
 }

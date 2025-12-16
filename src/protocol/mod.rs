@@ -37,6 +37,11 @@ pub fn route_request(method: &str, params: Value) -> Option<RequestSpec> {
             let params: lsp_types::HoverParams = serde_json::from_value(params).ok()?;
             Some(text_document::hover::handle(params))
         }
+        lsp_types::request::GotoDefinition::METHOD => {
+            let params: text_document::definition::DefinitionParams =
+                serde_json::from_value(params).ok()?;
+            Some(text_document::definition::handle(params))
+        }
         _ => None,
     }
 }
