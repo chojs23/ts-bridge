@@ -53,6 +53,10 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn new(plugin: PluginSettings) -> Self {
+        Self { plugin }
+    }
+
     pub fn plugin(&self) -> &PluginSettings {
         &self.plugin
     }

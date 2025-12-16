@@ -6,17 +6,30 @@
 //! implementation dynamically transformed method names into module paths; in
 //! Rust we will keep a static registry for clarity and compile-time checking.
 
+use serde_json::Value;
+
+use crate::rpc::{Priority, Route};
+
 pub mod text_document;
 
-/// Lookup table from LSP method names to handler functions.
-pub struct Router;
-
-impl Router {
-    pub fn resolve(_method: &str) -> Option<Handler> {
-        // TODO: implement method → handler dispatch
-        None
-    }
+#[derive(Debug)]
+pub struct RequestSpec {
+    pub route: Route,
+    pub payload: Value,
+    pub priority: Priority,
 }
 
-/// Handler signature; actual implementation will likely be async.
-pub type Handler = fn();
+#[derive(Debug)]
+pub struct NotificationSpec {
+    pub route: Route,
+    pub payload: Value,
+    pub priority: Priority,
+}
+
+pub fn route_request(_method: &str, _params: Value) -> Option<RequestSpec> {
+    None
+}
+
+pub fn route_notification(_method: &str, _params: Value) -> Option<NotificationSpec> {
+    None
+}

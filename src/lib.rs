@@ -15,15 +15,8 @@ pub mod process;
 pub mod protocol;
 pub mod provider;
 pub mod rpc;
+pub mod server;
 pub mod types;
 pub mod utils;
 
-/// Sets up logging/telemetry and wires every subsystem together.
-///
-/// At this stage it only logs what will happen next so downstream binary
-/// targets (e.g. the eventual Neovim entry point) already have a stable API to
-/// invoke while we fill in the internals.
-pub fn bootstrap() {
-    // TODO: replace println! with structured logging once tracing plumbing exists.
-    println!("ts-lsp-rs: bootstrap stub — wire config/provider/process once ready");
-}
+pub use server::run_stdio_server;
