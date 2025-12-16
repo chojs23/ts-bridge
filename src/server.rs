@@ -7,8 +7,9 @@ use lsp_server::{
     Response,
 };
 use lsp_types::{
-    HoverProviderCapability, InitializeParams, InitializeResult, OneOf, PublishDiagnosticsParams,
-    ServerCapabilities,
+    CompletionOptions, HoverProviderCapability, InitializeParams, InitializeResult, OneOf,
+    PublishDiagnosticsParams, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
+    TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TypeDefinitionProviderCapability,
     notification::{
         DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument,
         Notification as LspNotification, PublishDiagnostics,
@@ -18,6 +19,7 @@ use serde_json::{self, Value};
 
 use crate::config::{Config, PluginSettings};
 use crate::process::ServerKind;
+use crate::protocol::text_document::completion::TRIGGER_CHARACTERS;
 use crate::protocol::{self, ResponseAdapter};
 use crate::provider::Provider;
 use crate::rpc::{DispatchReceipt, Service};
@@ -59,9 +61,27 @@ pub fn run_stdio_server() -> anyhow::Result<()> {
 }
 
 fn advertised_capabilities() -> ServerCapabilities {
+    let text_sync = TextDocumentSyncOptions {
+        open_close: Some(true),
+        change: Some(TextDocumentSyncKind::FULL),
+        will_save: Some(false),
+        will_save_wait_until: Some(false),
+        save: Some(TextDocumentSyncSaveOptions::SaveOptions(
+            lsp_types::SaveOptions::default(),
+        )),
+    };
+    let completion_provider = CompletionOptions {
+        resolve_provider: Some(false),
+        trigger_characters: Some(TRIGGER_CHARACTERS.iter().map(|ch| ch.to_string()).collect()),
+        ..CompletionOptions::default()
+    };
     ServerCapabilities {
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         definition_provider: Some(OneOf::Left(true)),
+        references_provider: Some(OneOf::Left(true)),
+        type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
+        completion_provider: Some(completion_provider),
+        text_document_sync: Some(TextDocumentSyncCapability::Options(text_sync)),
         ..Default::default()
     }
 }
@@ -99,7 +119,10 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
                 if notif.method == DidOpenTextDocument::METHOD {
                     let params: crate::types::DidOpenTextDocumentParams =
                         serde_json::from_value(notif.params)?;
-                    let spec = crate::protocol::text_document::did_open::handle(params);
+                    let spec = crate::protocol::text_document::did_open::handle(
+                        params,
+                        service.workspace_root(),
+                    );
                     if let Err(err) =
                         service.dispatch_request(spec.route, spec.payload, spec.priority)
                     {
@@ -110,7 +133,10 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
                 if notif.method == DidChangeTextDocument::METHOD {
                     let params: crate::types::DidChangeTextDocumentParams =
                         serde_json::from_value(notif.params)?;
-                    let spec = crate::protocol::text_document::did_change::handle(params);
+                    let spec = crate::protocol::text_document::did_change::handle(
+                        params,
+                        service.workspace_root(),
+                    );
                     if let Err(err) =
                         service.dispatch_request(spec.route, spec.payload, spec.priority)
                     {
@@ -121,7 +147,10 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
                 if notif.method == DidCloseTextDocument::METHOD {
                     let params: crate::types::DidCloseTextDocumentParams =
                         serde_json::from_value(notif.params)?;
-                    let spec = crate::protocol::text_document::did_close::handle(params);
+                    let spec = crate::protocol::text_document::did_close::handle(
+                        params,
+                        service.workspace_root(),
+                    );
                     if let Err(err) =
                         service.dispatch_request(spec.route, spec.payload, spec.priority)
                     {

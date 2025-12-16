@@ -146,6 +146,10 @@ impl Service {
         events
     }
 
+    pub fn workspace_root(&self) -> &std::path::Path {
+        self.provider.workspace_root()
+    }
+
     fn flush_queue(&mut self, kind: ServerKind) -> Result<(), ServiceError> {
         match kind {
             ServerKind::Syntax => {

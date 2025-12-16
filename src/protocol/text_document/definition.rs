@@ -8,16 +8,16 @@
 //! into an LSP `LocationLink` so the client can show peek-definition previews
 //! with context.
 
-use std::str::FromStr;
-
 use anyhow::{Context, Result};
-use lsp_types::{GotoDefinitionParams, GotoDefinitionResponse, LocationLink, Uri};
+use lsp_types::{GotoDefinitionParams, GotoDefinitionResponse};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::protocol::RequestSpec;
 use crate::rpc::{Priority, Route};
-use crate::utils::{file_path_to_uri, tsserver_range_from_value_lsp, uri_to_file_path};
+use crate::utils::{
+    tsserver_range_from_value_lsp, tsserver_span_to_location_link, uri_to_file_path,
+};
 
 const CMD_DEFINITION: &str = "definitionAndBoundSpan";
 const CMD_SOURCE_DEFINITION: &str = "findSourceDefinition";
@@ -36,17 +36,11 @@ pub struct DefinitionContext {
 }
 
 pub fn handle(params: DefinitionParams) -> RequestSpec {
-    let text_document = params
-        .base
-        .text_document_position_params
-        .text_document;
+    let text_document = params.base.text_document_position_params.text_document;
     let uri_string = text_document.uri.to_string();
     let file_name = uri_to_file_path(text_document.uri.as_str()).unwrap_or(uri_string);
 
-    let position = params
-        .base
-        .text_document_position_params
-        .position;
+    let position = params.base.text_document_position_params.position;
     let use_source_definition = params
         .context
         .and_then(|ctx| ctx.source_definition)
@@ -99,54 +93,11 @@ fn adapt_definition(payload: &Value) -> Result<Value> {
 
     let mut links = Vec::new();
     for def in defs {
-        if let Some(link) = file_span_to_location_link(def, origin_selection.clone())? {
+        if let Some(link) = tsserver_span_to_location_link(def, origin_selection.clone()) {
             links.push(link);
         }
     }
 
     let response = GotoDefinitionResponse::Link(links);
     Ok(serde_json::to_value(response)?)
-}
-
-fn file_span_to_location_link(
-    span_value: &Value,
-    origin_selection: Option<lsp_types::Range>,
-) -> Result<Option<LocationLink>> {
-    let file = match span_value.get("file").and_then(|f| f.as_str()) {
-        Some(file) => file,
-        None => return Ok(None),
-    };
-    let target_uri = resolve_span_uri(file).context("invalid definition uri")?;
-
-    let target_selection = match tsserver_range_from_value_lsp(span_value) {
-        Some(range) => range,
-        None => return Ok(None),
-    };
-
-    let target_range = if let (Some(start), Some(end)) =
-        (span_value.get("contextStart"), span_value.get("contextEnd"))
-    {
-        tsserver_range_from_value_lsp(&json!({
-            "start": start,
-            "end": end
-        }))
-        .unwrap_or(target_selection.clone())
-    } else {
-        target_selection.clone()
-    };
-
-    Ok(Some(LocationLink {
-        origin_selection_range: origin_selection,
-        target_range,
-        target_selection_range: target_selection,
-        target_uri,
-    }))
-}
-
-fn resolve_span_uri(path: &str) -> Result<Uri> {
-    if path.starts_with("zipfile://") {
-        Uri::from_str(path).context("invalid zipfile uri")
-    } else {
-        file_path_to_uri(path).context("failed to convert path to uri")
-    }
 }

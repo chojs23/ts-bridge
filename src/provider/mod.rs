@@ -126,6 +126,10 @@ impl Provider {
             Err(err) => Err(ProviderError::PathLookup(err)),
         }
     }
+
+    pub fn workspace_root(&self) -> &Path {
+        &self.workspace_root
+    }
 }
 
 #[derive(thiserror::Error, Debug)]

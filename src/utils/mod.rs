@@ -6,9 +6,10 @@
 //! here so both the protocol handlers and the RPC bridge can reuse them without
 //! reimplementing the same glue each time.
 
+use std::path::Path;
 use std::str::FromStr;
 
-use lsp_types::Uri;
+use lsp_types::{CompletionItemKind, Location, LocationLink, Uri};
 use serde_json::Value;
 use url::Url;
 
@@ -55,14 +56,28 @@ pub fn file_path_to_uri(path: &str) -> Option<Uri> {
     Uri::from_str(url.as_str()).ok()
 }
 
-pub fn lsp_text_doc_to_tsserver_entry(doc: &TextDocumentItem) -> serde_json::Value {
+pub fn lsp_text_doc_to_tsserver_entry(
+    doc: &TextDocumentItem,
+    workspace_root: Option<&Path>,
+) -> serde_json::Value {
     let file = uri_to_file_path(&doc.uri).unwrap_or_else(|| doc.uri.clone());
     let script_kind = script_kind_from_language(doc.language_id.as_deref());
-    serde_json::json!({
+    let mut entry = serde_json::json!({
         "file": file,
         "fileContent": doc.text,
         "scriptKindName": script_kind,
-    })
+    });
+
+    if let Some(root) = workspace_root {
+        if let Some(obj) = entry.as_object_mut() {
+            obj.insert(
+                "projectRootPath".to_string(),
+                serde_json::json!(root.to_string_lossy().into_owned()),
+            );
+        }
+    }
+
+    entry
 }
 
 fn script_kind_from_language(lang: Option<&str>) -> &'static str {
@@ -124,4 +139,86 @@ pub fn tsserver_range_from_value_lsp(value: &Value) -> Option<lsp_types::Range> 
     let start = tsserver_position_value_lsp(value.get("start")?)?;
     let end = tsserver_position_value_lsp(value.get("end")?)?;
     Some(lsp_types::Range { start, end })
+}
+
+pub fn tsserver_file_to_uri(path: &str) -> Option<Uri> {
+    if path.starts_with("zipfile://") {
+        Uri::from_str(path).ok()
+    } else {
+        file_path_to_uri(path)
+    }
+}
+
+pub fn tsserver_span_to_location(value: &Value) -> Option<Location> {
+    let file = value.get("file")?.as_str()?;
+    let uri = tsserver_file_to_uri(file)?;
+    let range = tsserver_range_from_value_lsp(value)?;
+    Some(Location { uri, range })
+}
+
+pub fn tsserver_span_to_location_link(
+    value: &Value,
+    origin: Option<lsp_types::Range>,
+) -> Option<LocationLink> {
+    let file = value.get("file")?.as_str()?;
+    let target_uri = tsserver_file_to_uri(file)?;
+    let target_selection_range = tsserver_range_from_value_lsp(value)?;
+    let target_range =
+        if let (Some(start), Some(end)) = (value.get("contextStart"), value.get("contextEnd")) {
+            tsserver_range_from_value_lsp(&serde_json::json!({ "start": start, "end": end }))
+                .unwrap_or_else(|| target_selection_range.clone())
+        } else {
+            target_selection_range.clone()
+        };
+
+    Some(LocationLink {
+        origin_selection_range: origin,
+        target_range,
+        target_selection_range,
+        target_uri,
+    })
+}
+
+pub fn completion_item_kind_from_tsserver(kind: Option<&str>) -> CompletionItemKind {
+    match kind {
+        Some("keyword") => CompletionItemKind::KEYWORD,
+        Some("script") | Some("module") | Some("external module name") => {
+            CompletionItemKind::MODULE
+        }
+        Some("class") | Some("local class") => CompletionItemKind::CLASS,
+        Some("interface") => CompletionItemKind::INTERFACE,
+        Some("type") | Some("type parameter") => CompletionItemKind::TYPE_PARAMETER,
+        Some("enum") => CompletionItemKind::ENUM,
+        Some("enum member") => CompletionItemKind::ENUM_MEMBER,
+        Some("var") | Some("local var") | Some("let") => CompletionItemKind::VARIABLE,
+        Some("function") | Some("local function") => CompletionItemKind::FUNCTION,
+        Some("method") => CompletionItemKind::METHOD,
+        Some("getter") | Some("setter") | Some("property") => CompletionItemKind::PROPERTY,
+        Some("constructor") => CompletionItemKind::CONSTRUCTOR,
+        Some("call") | Some("index") | Some("construct") => CompletionItemKind::METHOD,
+        Some("parameter") => CompletionItemKind::FIELD,
+        Some("primitive type") | Some("label") => CompletionItemKind::KEYWORD,
+        Some("alias") => CompletionItemKind::VARIABLE,
+        Some("const") => CompletionItemKind::CONSTANT,
+        Some("directory") => CompletionItemKind::FILE,
+        Some("string") => CompletionItemKind::CONSTANT,
+        _ => CompletionItemKind::TEXT,
+    }
+}
+
+pub fn completion_commit_characters(kind: CompletionItemKind) -> Option<Vec<String>> {
+    match kind {
+        CompletionItemKind::CLASS => Some(vec![".".into(), ",".into(), "(".into()]),
+        CompletionItemKind::CONSTANT => Some(vec![".".into(), "?".into()]),
+        CompletionItemKind::CONSTRUCTOR => Some(vec!["(".into()]),
+        CompletionItemKind::ENUM => Some(vec![".".into()]),
+        CompletionItemKind::FIELD => Some(vec![".".into(), "(".into()]),
+        CompletionItemKind::FUNCTION => Some(vec![".".into(), "(".into()]),
+        CompletionItemKind::INTERFACE => Some(vec![":".into(), ".".into()]),
+        CompletionItemKind::METHOD => Some(vec!["(".into()]),
+        CompletionItemKind::MODULE => Some(vec![".".into(), "?".into()]),
+        CompletionItemKind::PROPERTY => Some(vec![".".into(), "?".into()]),
+        CompletionItemKind::VARIABLE => Some(vec![".".into(), "?".into()]),
+        _ => None,
+    }
 }

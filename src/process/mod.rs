@@ -72,7 +72,9 @@ impl TsserverProcess {
     /// Sends a JSON payload to tsserver using the Content-Length framing.
     pub fn write(&mut self, payload: &Value) -> Result<(), ProcessError> {
         let child = self.child.as_mut().ok_or(ProcessError::NotStarted)?;
-        let serialized = serde_json::to_string(payload).map_err(ProcessError::Serialize)?;
+        let mut serialized = serde_json::to_string(payload).map_err(ProcessError::Serialize)?;
+        serialized.push('\n');
+        log::trace!("tsserver {:?} <= {}", self.kind, serialized.trim_end());
         let header = format!("Content-Length: {}\r\n\r\n", serialized.len());
         child
             .stdin
