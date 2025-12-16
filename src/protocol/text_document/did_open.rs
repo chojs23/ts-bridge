@@ -20,5 +20,6 @@ pub fn handle(params: DidOpenTextDocumentParams) -> RequestSpec {
         route: Route::Syntax,
         payload: request,
         priority: Priority::Const,
+        on_response: None,
     }
 }

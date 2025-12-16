@@ -81,30 +81,46 @@ impl Service {
         route: Route,
         payload: Value,
         priority: Priority,
-    ) -> Result<Option<u64>, ServiceError> {
+    ) -> Result<Vec<DispatchReceipt>, ServiceError> {
+        let mut receipts = Vec::new();
         match route {
             Route::Syntax => {
                 let seq = self.syntax_queue.enqueue(payload, priority);
                 self.flush_queue(ServerKind::Syntax)?;
-                Ok(Some(seq))
+                receipts.push(DispatchReceipt {
+                    server: ServerKind::Syntax,
+                    seq,
+                });
             }
             Route::Semantic => {
                 if self.semantic.is_some() {
-                    let _ = self.semantic_queue.enqueue(payload, priority);
+                    let seq = self.semantic_queue.enqueue(payload, priority);
                     self.flush_queue(ServerKind::Semantic)?;
+                    receipts.push(DispatchReceipt {
+                        server: ServerKind::Semantic,
+                        seq,
+                    });
                 }
-                Ok(None)
             }
             Route::Both => {
                 let seq = self.syntax_queue.enqueue(payload.clone(), priority);
                 self.flush_queue(ServerKind::Syntax)?;
+                receipts.push(DispatchReceipt {
+                    server: ServerKind::Syntax,
+                    seq,
+                });
                 if self.semantic.is_some() {
-                    let _ = self.semantic_queue.enqueue(payload, priority);
+                    let semantic_seq = self.semantic_queue.enqueue(payload, priority);
                     self.flush_queue(ServerKind::Semantic)?;
+                    receipts.push(DispatchReceipt {
+                        server: ServerKind::Semantic,
+                        seq: semantic_seq,
+                    });
                 }
-                Ok(Some(seq))
             }
         }
+
+        Ok(receipts)
     }
 
     /// Cancels a pending request on both servers.
@@ -168,6 +184,12 @@ pub enum ServiceError {
 pub struct ServerEvent {
     pub server: ServerKind,
     pub payload: Value,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DispatchReceipt {
+    pub server: ServerKind,
+    pub seq: u64,
 }
 
 #[derive(Debug, Clone, Copy)]
