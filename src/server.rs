@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use lsp_server::{Connection, ErrorCode, Message, Request, Response};
-use lsp_types::{InitializeParams, InitializeResult, ServerCapabilities};
+use lsp_types::{
+    InitializeParams, InitializeResult, ServerCapabilities,
+    notification::{DidChangeTextDocument, DidOpenTextDocument, Notification},
+};
 use serde_json::Value;
 
 use crate::config::{Config, PluginSettings};
@@ -79,6 +82,28 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
             Message::Notification(notif) => {
                 if notif.method == "exit" {
                     break;
+                }
+                if notif.method == DidOpenTextDocument::METHOD {
+                    let params: crate::types::DidOpenTextDocumentParams =
+                        serde_json::from_value(notif.params)?;
+                    let spec = crate::protocol::text_document::did_open::handle(params);
+                    if let Err(err) =
+                        service.dispatch_request(spec.route, spec.payload, spec.priority)
+                    {
+                        log::warn!("failed to dispatch didOpen: {err}");
+                    }
+                    continue;
+                }
+                if notif.method == DidChangeTextDocument::METHOD {
+                    let params: crate::types::DidChangeTextDocumentParams =
+                        serde_json::from_value(notif.params)?;
+                    let spec = crate::protocol::text_document::did_change::handle(params);
+                    if let Err(err) =
+                        service.dispatch_request(spec.route, spec.payload, spec.priority)
+                    {
+                        log::warn!("failed to dispatch didChange: {err}");
+                    }
+                    continue;
                 }
                 if let Some(spec) =
                     protocol::route_notification(&notif.method, notif.params.clone())

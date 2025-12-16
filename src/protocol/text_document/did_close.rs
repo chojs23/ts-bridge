@@ -1,5 +1,22 @@
-//! Handles `textDocument/didClose` notifications.
+use serde_json::json;
 
-pub fn handle() {
-    todo!("Forward closed file paths to tsserver UpdateOpen:closedFiles");
+use crate::protocol::NotificationSpec;
+use crate::rpc::{Priority, Route};
+use crate::types::DidCloseTextDocumentParams;
+
+pub fn handle(params: DidCloseTextDocumentParams) -> NotificationSpec {
+    let request = json!({
+        "command": "updateOpen",
+        "arguments": {
+            "openFiles": [],
+            "changedFiles": [],
+            "closedFiles": [params.text_document.uri],
+        }
+    });
+
+    NotificationSpec {
+        route: Route::Syntax,
+        payload: request,
+        priority: Priority::Const,
+    }
 }

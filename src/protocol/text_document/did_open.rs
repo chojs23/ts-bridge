@@ -1,6 +1,24 @@
-//! Handles `textDocument/didOpen` by updating tsserver’s open files list and
-//! pushing a configure request, mirroring the Lua implementation.
+use serde_json::json;
 
-pub fn handle() {
-    todo!("Translate didOpen params into tsserver UpdateOpen + Configure commands");
+use crate::protocol::RequestSpec;
+use crate::rpc::{Priority, Route};
+use crate::types::DidOpenTextDocumentParams;
+use crate::utils::lsp_text_doc_to_tsserver_entry;
+
+pub fn handle(params: DidOpenTextDocumentParams) -> RequestSpec {
+    let entry = lsp_text_doc_to_tsserver_entry(&params.text_document);
+    let request = json!({
+        "command": "updateOpen",
+        "arguments": {
+            "openFiles": [entry],
+            "changedFiles": [],
+            "closedFiles": [],
+        }
+    });
+
+    RequestSpec {
+        route: Route::Syntax,
+        payload: request,
+        priority: Priority::Const,
+    }
 }
