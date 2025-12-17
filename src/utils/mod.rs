@@ -95,37 +95,30 @@ pub fn tsserver_text_changes_from_edits(
 ) -> Vec<serde_json::Value> {
     let mut changes = Vec::with_capacity(edits.len());
     for change in edits.iter().rev() {
+        let Some(range) = &change.range else {
+            log::warn!(
+                "dropping textDocument/didChange edit without range; incremental sync is required"
+            );
+            continue;
+        };
+
         let mut payload = serde_json::json!({ "newText": change.text });
-        if let Some(range) = &change.range {
-            let ts_range = lsp_range_to_tsserver(range);
-            if let Some(obj) = payload.as_object_mut() {
-                obj.insert(
-                    "start".to_string(),
-                    serde_json::json!({
-                        "line": ts_range.start.line,
-                        "offset": ts_range.start.offset
-                    }),
-                );
-                obj.insert(
-                    "end".to_string(),
-                    serde_json::json!({
-                        "line": ts_range.end.line,
-                        "offset": ts_range.end.offset
-                    }),
-                );
-            }
-        } else {
-            log::warn!("tsserver change missing range; falling back to whole-document replace");
-            if let Some(obj) = payload.as_object_mut() {
-                obj.insert(
-                    "start".to_string(),
-                    serde_json::json!({ "line": 1, "offset": 1 }),
-                );
-                obj.insert(
-                    "end".to_string(),
-                    serde_json::json!({ "line": u32::MAX, "offset": u32::MAX }),
-                );
-            }
+        let ts_range = lsp_range_to_tsserver(range);
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert(
+                "start".to_string(),
+                serde_json::json!({
+                    "line": ts_range.start.line,
+                    "offset": ts_range.start.offset
+                }),
+            );
+            obj.insert(
+                "end".to_string(),
+                serde_json::json!({
+                    "line": ts_range.end.line,
+                    "offset": ts_range.end.offset
+                }),
+            );
         }
         changes.push(payload);
     }

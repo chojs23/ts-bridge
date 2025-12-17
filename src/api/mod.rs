@@ -3,8 +3,7 @@
 //! =============================================================================
 //!
 //! Functions exposed to end users (organize imports, fix-all, rename file,
-//! diagnostics throttling, etc.) will live here.  This structure mirrors
-//! `lua/typescript-tools/api.lua`.
+//! diagnostics throttling, etc.) will live here.
 
 pub fn organize_imports_sync() {
     todo!("Call protocol::text_document::organize_imports handler once implemented");

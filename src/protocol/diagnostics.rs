@@ -5,12 +5,30 @@ use crate::protocol::NotificationSpec;
 use crate::rpc::{Priority, Route};
 use crate::utils::{file_path_to_uri, tsserver_range_from_value_lsp};
 
-const DIAG_EVENTS: &[&str] = &["semanticDiag", "syntaxDiag", "suggestionDiag"];
 const REQUEST_COMPLETED: &str = "requestCompleted";
+
+#[derive(Debug, Clone, Copy)]
+pub enum DiagnosticsKind {
+    Syntax,
+    Semantic,
+    Suggestion,
+}
+
+impl DiagnosticsKind {
+    fn from_event_name(name: &str) -> Option<Self> {
+        match name {
+            "syntaxDiag" => Some(DiagnosticsKind::Syntax),
+            "semanticDiag" => Some(DiagnosticsKind::Semantic),
+            "suggestionDiag" => Some(DiagnosticsKind::Suggestion),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum DiagnosticsEvent {
     Report {
+        kind: DiagnosticsKind,
         request_seq: Option<u64>,
         uri: Uri,
         diagnostics: Vec<Diagnostic>,
@@ -48,9 +66,7 @@ pub fn parse_tsserver_event(payload: &Value) -> Option<DiagnosticsEvent> {
             .and_then(|value| value.as_u64())?;
         return Some(DiagnosticsEvent::Completed { request_seq: seq });
     }
-    if !DIAG_EVENTS.contains(&event_name) {
-        return None;
-    }
+    let kind = DiagnosticsKind::from_event_name(event_name)?;
 
     let body = payload.get("body")?;
     let file = body.get("file")?.as_str()?;
@@ -69,6 +85,7 @@ pub fn parse_tsserver_event(payload: &Value) -> Option<DiagnosticsEvent> {
 
     Some(DiagnosticsEvent::Report {
         request_seq,
+        kind,
         uri,
         diagnostics: lsp_diagnostics,
     })

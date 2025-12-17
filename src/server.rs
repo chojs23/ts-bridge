@@ -11,9 +11,9 @@ use lsp_server::{
 };
 use lsp_types::{
     CompletionOptions, HoverProviderCapability, InitializeParams, InitializeResult, OneOf,
-    PublishDiagnosticsParams, ServerCapabilities, SignatureHelpOptions, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions,
-    TypeDefinitionProviderCapability,
+    PositionEncodingKind, PublishDiagnosticsParams, ServerCapabilities, SignatureHelpOptions,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    TextDocumentSyncSaveOptions, TypeDefinitionProviderCapability,
     notification::{
         DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument,
         Notification as LspNotification, PublishDiagnostics,
@@ -23,7 +23,7 @@ use serde_json::{self, Value};
 
 use crate::config::{Config, PluginSettings};
 use crate::process::ServerKind;
-use crate::protocol::diagnostics::DiagnosticsEvent;
+use crate::protocol::diagnostics::{DiagnosticsEvent, DiagnosticsKind};
 use crate::protocol::text_document::completion::TRIGGER_CHARACTERS;
 use crate::protocol::text_document::signature_help::TRIGGER_CHARACTERS as SIG_HELP_TRIGGER_CHARACTERS;
 use crate::protocol::{self, ResponseAdapter};
@@ -93,6 +93,7 @@ fn advertised_capabilities() -> ServerCapabilities {
         ..SignatureHelpOptions::default()
     };
     ServerCapabilities {
+        position_encoding: Some(PositionEncodingKind::UTF16),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         definition_provider: Some(OneOf::Left(true)),
         references_provider: Some(OneOf::Left(true)),
@@ -451,8 +452,9 @@ struct PendingEntry {
 
 #[derive(Default)]
 struct DiagnosticsState {
-    pending: HashMap<(ServerKind, u64), HashMap<lsp_types::Uri, Vec<lsp_types::Diagnostic>>>,
+    pending: HashMap<(ServerKind, u64), HashMap<lsp_types::Uri, FileDiagnostics>>,
     order: HashMap<ServerKind, VecDeque<u64>>,
+    latest: HashMap<lsp_types::Uri, FileDiagnostics>,
     ready: VecDeque<(lsp_types::Uri, Vec<lsp_types::Diagnostic>)>,
 }
 
@@ -473,6 +475,7 @@ impl DiagnosticsState {
                 uri,
                 diagnostics,
                 request_seq,
+                kind,
             } => {
                 let key = request_seq.map(|seq| (server, seq)).or_else(|| {
                     self.order
@@ -484,15 +487,18 @@ impl DiagnosticsState {
                     if let Some(files) = self.pending.get_mut(&key) {
                         files
                             .entry(uri.clone())
-                            .or_insert_with(Vec::new)
-                            .extend(diagnostics.clone());
+                            .or_insert_with(FileDiagnostics::default)
+                            .update_kind(kind, diagnostics);
                         return;
                     }
                 }
-                if request_seq.is_none() && diagnostics.is_empty() {
-                    return;
+                let mut latest = self.latest.remove(&uri).unwrap_or_default();
+                latest.update_kind(kind, diagnostics);
+                let combined = latest.collect();
+                if !combined.is_empty() {
+                    self.latest.insert(uri.clone(), latest);
                 }
-                self.ready.push_back((uri, diagnostics));
+                self.ready.push_back((uri, combined));
             }
             DiagnosticsEvent::Completed { request_seq } => {
                 let key = (server, request_seq);
@@ -502,8 +508,14 @@ impl DiagnosticsState {
                             queue.remove(pos);
                         }
                     }
-                    for (uri, diagnostics) in files {
-                        self.ready.push_back((uri, diagnostics));
+                    for (uri, diags) in files {
+                        let combined = diags.collect();
+                        if combined.is_empty() {
+                            self.latest.remove(&uri);
+                        } else {
+                            self.latest.insert(uri.clone(), diags);
+                        }
+                        self.ready.push_back((uri, combined));
                     }
                 }
             }
@@ -512,5 +524,31 @@ impl DiagnosticsState {
 
     fn take_ready(&mut self) -> Option<(lsp_types::Uri, Vec<lsp_types::Diagnostic>)> {
         self.ready.pop_front()
+    }
+}
+
+#[derive(Clone, Default)]
+struct FileDiagnostics {
+    syntax: Vec<lsp_types::Diagnostic>,
+    semantic: Vec<lsp_types::Diagnostic>,
+    suggestion: Vec<lsp_types::Diagnostic>,
+}
+
+impl FileDiagnostics {
+    fn update_kind(&mut self, kind: DiagnosticsKind, diagnostics: Vec<lsp_types::Diagnostic>) {
+        match kind {
+            DiagnosticsKind::Syntax => self.syntax = diagnostics,
+            DiagnosticsKind::Semantic => self.semantic = diagnostics,
+            DiagnosticsKind::Suggestion => self.suggestion = diagnostics,
+        }
+    }
+
+    fn collect(&self) -> Vec<lsp_types::Diagnostic> {
+        let mut all =
+            Vec::with_capacity(self.syntax.len() + self.semantic.len() + self.suggestion.len());
+        all.extend(self.syntax.iter().cloned());
+        all.extend(self.semantic.iter().cloned());
+        all.extend(self.suggestion.iter().cloned());
+        all
     }
 }

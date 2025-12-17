@@ -2,8 +2,7 @@
 //! Configuration And Settings
 //! =============================================================================
 //!
-//! This module mirrors `lua/typescript-tools/config.lua`.  It owns every user
-//! facing knob (diagnostic strategy, formatting preferences, code lens modes,
+//! It owns every user facing knob (diagnostic strategy, formatting preferences, code lens modes,
 //! jsx helpers, tsserver memory limits, etc.) and exposes typed structures that
 //! other subsystems borrow.
 
