@@ -127,10 +127,11 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
     let mut pending = PendingRequests::default();
     let mut diag_state = DiagnosticsState::default();
     let mut progress = LoadingProgress::new();
+    let project_label = friendly_project_name(service.workspace_root());
     if let Err(err) = progress.begin(
         &connection,
         "ts-lsp-rs",
-        "Booting the TypeScript language service",
+        &format!("Booting {project_label}"),
     ) {
         log::debug!("work-done progress begin failed: {err:?}");
     }
@@ -143,6 +144,7 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
             &mut pending,
             &mut diag_state,
             &mut progress,
+            &project_label,
         )?;
 
         match connection.receiver.recv_timeout(poll_interval) {
@@ -174,17 +176,18 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
                         {
                             log::warn!("failed to dispatch didOpen: {err}");
                         }
-                        if let Err(err) = progress.report(
-                            &connection,
-                            &format!("Analyzing {}", friendly_file_name(&file_for_diagnostics)),
-                        ) {
-                            log::debug!("work-done progress report failed: {err:?}");
-                        }
                         request_file_diagnostics(
                             &mut service,
                             &file_for_diagnostics,
                             &mut diag_state,
                         );
+                        if let Err(err) = progress.report(
+                            &connection,
+                            &format!("Analyzing {project_label} — scheduling diagnostics"),
+                            diag_state.progress_percent(),
+                        ) {
+                            log::debug!("work-done progress report failed: {err:?}");
+                        }
                         continue;
                     }
                     if notif.method == DidChangeTextDocument::METHOD {
@@ -202,17 +205,18 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
                         {
                             log::warn!("failed to dispatch didChange: {err}");
                         }
-                        if let Err(err) = progress.report(
-                            &connection,
-                            &format!("Analyzing {}", friendly_file_name(&file_for_diagnostics)),
-                        ) {
-                            log::debug!("work-done progress report failed: {err:?}");
-                        }
                         request_file_diagnostics(
                             &mut service,
                             &file_for_diagnostics,
                             &mut diag_state,
                         );
+                        if let Err(err) = progress.report(
+                            &connection,
+                            &format!("Analyzing {project_label} — scheduling diagnostics"),
+                            diag_state.progress_percent(),
+                        ) {
+                            log::debug!("work-done progress report failed: {err:?}");
+                        }
                         continue;
                     }
                     if notif.method == DidCloseTextDocument::METHOD {
@@ -258,9 +262,14 @@ fn drain_tsserver(
     pending: &mut PendingRequests,
     diag_state: &mut DiagnosticsState,
     progress: &mut LoadingProgress,
+    project_label: &str,
 ) -> anyhow::Result<()> {
     for event in service.poll_responses() {
         if let Some(diag_event) = protocol::diagnostics::parse_tsserver_event(&event.payload) {
+            let stage_label = match &diag_event {
+                DiagnosticsEvent::Report { kind, .. } => Some(stage_text(*kind)),
+                DiagnosticsEvent::Completed { .. } => Some("finalizing diagnostics"),
+            };
             diag_state.handle_event(event.server, diag_event);
             while let Some((uri, diagnostics)) = diag_state.take_ready() {
                 publish_diagnostics(
@@ -271,9 +280,26 @@ fn drain_tsserver(
                         version: None,
                     },
                 )?;
-                if let Err(err) = progress.end(connection, "Language features ready") {
+            }
+            if diag_state.has_pending() {
+                let message = if let Some(stage) = stage_label {
+                    format!("Analyzing {project_label} — {stage}")
+                } else {
+                    format!("Analyzing {project_label}")
+                };
+                if let Err(err) =
+                    progress.report(connection, &message, diag_state.progress_percent())
+                {
+                    log::debug!("work-done progress report failed: {err:?}");
+                }
+            } else {
+                if let Err(err) = progress.end(
+                    connection,
+                    &format!("Language features ready in {project_label}"),
+                ) {
                     log::debug!("work-done progress end failed: {err:?}");
                 }
+                diag_state.reset_if_idle();
             }
             continue;
         } else if let Some(response) = pending.resolve(event.server, &event.payload)? {
@@ -487,10 +513,11 @@ struct PendingEntry {
 
 #[derive(Default)]
 struct DiagnosticsState {
-    pending: HashMap<(ServerKind, u64), HashMap<lsp_types::Uri, FileDiagnostics>>,
+    pending: HashMap<(ServerKind, u64), PendingDiagnosticsEntry>,
     order: HashMap<ServerKind, VecDeque<u64>>,
     latest: HashMap<lsp_types::Uri, FileDiagnostics>,
     ready: VecDeque<(lsp_types::Uri, Vec<lsp_types::Diagnostic>)>,
+    workload: Workload,
 }
 
 impl DiagnosticsState {
@@ -499,9 +526,9 @@ impl DiagnosticsState {
             .entry(server)
             .or_insert_with(VecDeque::new)
             .push_back(seq);
-        self.pending
-            .entry((server, seq))
-            .or_insert_with(HashMap::new);
+        let entry = PendingDiagnosticsEntry::new(server);
+        self.workload.add_expected(entry.progress.expected_count());
+        self.pending.insert((server, seq), entry);
     }
 
     fn handle_event(&mut self, server: ServerKind, event: DiagnosticsEvent) {
@@ -519,11 +546,15 @@ impl DiagnosticsState {
                         .map(|seq| (server, seq))
                 });
                 if let Some(key) = key {
-                    if let Some(files) = self.pending.get_mut(&key) {
-                        files
+                    if let Some(entry) = self.pending.get_mut(&key) {
+                        entry
+                            .files
                             .entry(uri.clone())
                             .or_insert_with(FileDiagnostics::default)
                             .update_kind(kind, diagnostics);
+                        if entry.progress.mark(kind) {
+                            self.workload.add_completed(1);
+                        }
                         return;
                     }
                 }
@@ -537,13 +568,13 @@ impl DiagnosticsState {
             }
             DiagnosticsEvent::Completed { request_seq } => {
                 let key = (server, request_seq);
-                if let Some(files) = self.pending.remove(&key) {
+                if let Some(mut entry) = self.pending.remove(&key) {
                     if let Some(queue) = self.order.get_mut(&server) {
                         if let Some(pos) = queue.iter().position(|seq| *seq == request_seq) {
                             queue.remove(pos);
                         }
                     }
-                    for (uri, diags) in files {
+                    for (uri, diags) in entry.files.into_iter() {
                         let combined = diags.collect();
                         if combined.is_empty() {
                             self.latest.remove(&uri);
@@ -551,6 +582,10 @@ impl DiagnosticsState {
                             self.latest.insert(uri.clone(), diags);
                         }
                         self.ready.push_back((uri, combined));
+                    }
+                    let forced = entry.progress.finish_outstanding();
+                    if forced > 0 {
+                        self.workload.add_completed(forced);
                     }
                 }
             }
@@ -560,6 +595,41 @@ impl DiagnosticsState {
     fn take_ready(&mut self) -> Option<(lsp_types::Uri, Vec<lsp_types::Diagnostic>)> {
         self.ready.pop_front()
     }
+
+    fn progress_percent(&self) -> Option<u32> {
+        if self.workload.expected == 0 {
+            None
+        } else {
+            Some(
+                (self.workload.completed.saturating_mul(100) / self.workload.expected)
+                    .clamp(0, 100),
+            )
+        }
+    }
+
+    fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
+    fn reset_if_idle(&mut self) {
+        if self.pending.is_empty() {
+            self.workload.reset();
+        }
+    }
+}
+
+struct PendingDiagnosticsEntry {
+    files: HashMap<lsp_types::Uri, FileDiagnostics>,
+    progress: StepProgress,
+}
+
+impl PendingDiagnosticsEntry {
+    fn new(server: ServerKind) -> Self {
+        Self {
+            files: HashMap::new(),
+            progress: StepProgress::for_server(server),
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -567,6 +637,114 @@ struct FileDiagnostics {
     syntax: Vec<lsp_types::Diagnostic>,
     semantic: Vec<lsp_types::Diagnostic>,
     suggestion: Vec<lsp_types::Diagnostic>,
+}
+
+#[derive(Clone, Copy)]
+struct StepProgress {
+    syntax: StepState,
+    semantic: StepState,
+    suggestion: StepState,
+}
+
+impl StepProgress {
+    fn for_server(server: ServerKind) -> Self {
+        match server {
+            ServerKind::Syntax => Self {
+                syntax: StepState::expected(true),
+                semantic: StepState::expected(false),
+                suggestion: StepState::expected(true),
+            },
+            ServerKind::Semantic => Self {
+                syntax: StepState::expected(false),
+                semantic: StepState::expected(true),
+                suggestion: StepState::expected(false),
+            },
+        }
+    }
+
+    fn expected_count(&self) -> u32 {
+        self.syntax.expected_count()
+            + self.semantic.expected_count()
+            + self.suggestion.expected_count()
+    }
+
+    fn mark(&mut self, kind: DiagnosticsKind) -> bool {
+        match kind {
+            DiagnosticsKind::Syntax => self.syntax.mark_done(),
+            DiagnosticsKind::Semantic => self.semantic.mark_done(),
+            DiagnosticsKind::Suggestion => self.suggestion.mark_done(),
+        }
+    }
+
+    fn finish_outstanding(&mut self) -> u32 {
+        let mut added = 0;
+        if self.syntax.finish() {
+            added += 1;
+        }
+        if self.semantic.finish() {
+            added += 1;
+        }
+        if self.suggestion.finish() {
+            added += 1;
+        }
+        added
+    }
+}
+
+#[derive(Clone, Copy)]
+struct StepState {
+    expected: bool,
+    done: bool,
+}
+
+impl StepState {
+    fn expected(expected: bool) -> Self {
+        Self {
+            expected,
+            done: !expected,
+        }
+    }
+
+    fn expected_count(&self) -> u32 {
+        if self.expected { 1 } else { 0 }
+    }
+
+    fn mark_done(&mut self) -> bool {
+        if self.expected && !self.done {
+            self.done = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn finish(&mut self) -> bool {
+        self.mark_done()
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct Workload {
+    expected: u32,
+    completed: u32,
+}
+
+impl Workload {
+    fn add_expected(&mut self, count: u32) {
+        self.expected = self.expected.saturating_add(count);
+    }
+
+    fn add_completed(&mut self, count: u32) {
+        if count == 0 {
+            return;
+        }
+        self.completed = (self.completed + count).min(self.expected);
+    }
+
+    fn reset(&mut self) {
+        self.expected = 0;
+        self.completed = 0;
+    }
 }
 
 struct LoadingProgress {
@@ -605,7 +783,12 @@ impl LoadingProgress {
         Ok(())
     }
 
-    fn report(&mut self, connection: &Connection, message: &str) -> anyhow::Result<()> {
+    fn report(
+        &mut self,
+        connection: &Connection,
+        message: &str,
+        percent: Option<u32>,
+    ) -> anyhow::Result<()> {
         if !self.active {
             return Ok(());
         }
@@ -614,6 +797,7 @@ impl LoadingProgress {
             value: ProgressParamsValue::WorkDone(LspWorkDoneProgress::Report(
                 WorkDoneProgressReport {
                     message: Some(message.to_string()),
+                    percentage: percent,
                     ..WorkDoneProgressReport::default()
                 },
             )),
@@ -668,14 +852,6 @@ fn next_request_id() -> RequestId {
     RequestId::from(format!("ts-lsp-rs-request-{seq}"))
 }
 
-fn friendly_file_name(path: &str) -> String {
-    Path::new(path)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(path)
-        .to_string()
-}
-
 impl FileDiagnostics {
     fn update_kind(&mut self, kind: DiagnosticsKind, diagnostics: Vec<lsp_types::Diagnostic>) {
         match kind {
@@ -692,5 +868,20 @@ impl FileDiagnostics {
         all.extend(self.semantic.iter().cloned());
         all.extend(self.suggestion.iter().cloned());
         all
+    }
+}
+
+fn friendly_project_name(root: &Path) -> String {
+    root.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.to_string())
+        .unwrap_or_else(|| root.display().to_string())
+}
+
+fn stage_text(kind: DiagnosticsKind) -> &'static str {
+    match kind {
+        DiagnosticsKind::Syntax => "running syntax checks",
+        DiagnosticsKind::Semantic => "evaluating semantic diagnostics",
+        DiagnosticsKind::Suggestion => "collecting suggestions",
     }
 }
