@@ -93,23 +93,43 @@ fn script_kind_from_language(lang: Option<&str>) -> &'static str {
 pub fn tsserver_text_changes_from_edits(
     edits: &[TextDocumentContentChangeEvent],
 ) -> Vec<serde_json::Value> {
-    edits
-        .iter()
-        .map(|change| {
-            if let Some(range) = &change.range {
-                let ts_range = lsp_range_to_tsserver(range);
-                serde_json::json!({
-                    "start": { "line": ts_range.start.line, "offset": ts_range.start.offset },
-                    "end": { "line": ts_range.end.line, "offset": ts_range.end.offset },
-                    "newText": change.text,
-                })
-            } else {
-                serde_json::json!({
-                    "newText": change.text,
-                })
+    let mut changes = Vec::with_capacity(edits.len());
+    for change in edits.iter().rev() {
+        let mut payload = serde_json::json!({ "newText": change.text });
+        if let Some(range) = &change.range {
+            let ts_range = lsp_range_to_tsserver(range);
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert(
+                    "start".to_string(),
+                    serde_json::json!({
+                        "line": ts_range.start.line,
+                        "offset": ts_range.start.offset
+                    }),
+                );
+                obj.insert(
+                    "end".to_string(),
+                    serde_json::json!({
+                        "line": ts_range.end.line,
+                        "offset": ts_range.end.offset
+                    }),
+                );
             }
-        })
-        .collect()
+        } else {
+            log::warn!("tsserver change missing range; falling back to whole-document replace");
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert(
+                    "start".to_string(),
+                    serde_json::json!({ "line": 1, "offset": 1 }),
+                );
+                obj.insert(
+                    "end".to_string(),
+                    serde_json::json!({ "line": u32::MAX, "offset": u32::MAX }),
+                );
+            }
+        }
+        changes.push(payload);
+    }
+    changes
 }
 
 pub fn tsserver_position_value(value: &Value) -> Option<Position> {

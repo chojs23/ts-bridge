@@ -1,15 +1,53 @@
-use lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, PublishDiagnosticsParams};
-use serde_json::Value;
+use lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Uri};
+use serde_json::{Value, json};
 
+use crate::protocol::NotificationSpec;
+use crate::rpc::{Priority, Route};
 use crate::utils::{file_path_to_uri, tsserver_range_from_value_lsp};
 
 const DIAG_EVENTS: &[&str] = &["semanticDiag", "syntaxDiag", "suggestionDiag"];
+const REQUEST_COMPLETED: &str = "requestCompleted";
 
-pub fn from_tsserver_event(payload: &Value) -> Option<PublishDiagnosticsParams> {
+#[derive(Debug)]
+pub enum DiagnosticsEvent {
+    Report {
+        request_seq: Option<u64>,
+        uri: Uri,
+        diagnostics: Vec<Diagnostic>,
+    },
+    Completed {
+        request_seq: u64,
+    },
+}
+
+pub fn request_for_file(file: &str) -> NotificationSpec {
+    let payload = json!({
+        "command": "geterr",
+        "arguments": {
+            "files": [file],
+            "delay": 0,
+        }
+    });
+
+    NotificationSpec {
+        route: Route::Both,
+        payload,
+        priority: Priority::Low,
+    }
+}
+
+pub fn parse_tsserver_event(payload: &Value) -> Option<DiagnosticsEvent> {
     if payload.get("type")?.as_str()? != "event" {
         return None;
     }
     let event_name = payload.get("event")?.as_str()?;
+    if event_name == REQUEST_COMPLETED {
+        let seq = payload
+            .get("body")
+            .and_then(|body| body.get("request_seq"))
+            .and_then(|value| value.as_u64())?;
+        return Some(DiagnosticsEvent::Completed { request_seq: seq });
+    }
     if !DIAG_EVENTS.contains(&event_name) {
         return None;
     }
@@ -17,22 +55,27 @@ pub fn from_tsserver_event(payload: &Value) -> Option<PublishDiagnosticsParams> 
     let body = payload.get("body")?;
     let file = body.get("file")?.as_str()?;
     let uri = file_path_to_uri(file)?;
-    let diagnostics = body.get("diagnostics")?.as_array()?;
+    let request_seq = body.get("request_seq").and_then(|value| value.as_u64());
+    let diagnostics = body
+        .get("diagnostics")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
 
     let lsp_diagnostics = diagnostics
-        .iter()
+        .into_iter()
         .filter_map(convert_diagnostic)
         .collect::<Vec<_>>();
 
-    Some(PublishDiagnosticsParams {
+    Some(DiagnosticsEvent::Report {
+        request_seq,
         uri,
         diagnostics: lsp_diagnostics,
-        version: None,
     })
 }
 
-fn convert_diagnostic(value: &Value) -> Option<Diagnostic> {
-    let range = tsserver_range_from_value_lsp(value)?;
+fn convert_diagnostic(value: Value) -> Option<Diagnostic> {
+    let range = tsserver_range_from_value_lsp(&value)?;
     let message = value.get("text")?.as_str()?.to_string();
     let severity = map_severity(value.get("category").and_then(|v| v.as_str()));
     let code = value

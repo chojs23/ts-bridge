@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -22,11 +23,13 @@ use serde_json::{self, Value};
 
 use crate::config::{Config, PluginSettings};
 use crate::process::ServerKind;
+use crate::protocol::diagnostics::DiagnosticsEvent;
 use crate::protocol::text_document::completion::TRIGGER_CHARACTERS;
 use crate::protocol::text_document::signature_help::TRIGGER_CHARACTERS as SIG_HELP_TRIGGER_CHARACTERS;
 use crate::protocol::{self, ResponseAdapter};
 use crate::provider::Provider;
 use crate::rpc::{DispatchReceipt, Service};
+use crate::utils::uri_to_file_path;
 
 /// Runs the LSP server over stdio. This is the entry-point Neovim (or any LSP
 /// client) will execute.
@@ -67,7 +70,7 @@ pub fn run_stdio_server() -> anyhow::Result<()> {
 fn advertised_capabilities() -> ServerCapabilities {
     let text_sync = TextDocumentSyncOptions {
         open_close: Some(true),
-        change: Some(TextDocumentSyncKind::FULL),
+        change: Some(TextDocumentSyncKind::INCREMENTAL),
         will_save: Some(false),
         will_save_wait_until: Some(false),
         save: Some(TextDocumentSyncSaveOptions::SaveOptions(
@@ -116,10 +119,11 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
     }
 
     let mut pending = PendingRequests::default();
+    let mut diag_state = DiagnosticsState::default();
 
     let poll_interval = Duration::from_millis(10);
     loop {
-        drain_tsserver(&connection, &mut service, &mut pending)?;
+        drain_tsserver(&connection, &mut service, &mut pending, &mut diag_state)?;
 
         match connection.receiver.recv_timeout(poll_interval) {
             Ok(message) => match message {
@@ -138,6 +142,9 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
                     if notif.method == DidOpenTextDocument::METHOD {
                         let params: crate::types::DidOpenTextDocumentParams =
                             serde_json::from_value(notif.params)?;
+                        let file_for_diagnostics =
+                            uri_to_file_path(params.text_document.uri.as_str())
+                                .unwrap_or_else(|| params.text_document.uri.to_string());
                         let spec = crate::protocol::text_document::did_open::handle(
                             params,
                             service.workspace_root(),
@@ -147,11 +154,19 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
                         {
                             log::warn!("failed to dispatch didOpen: {err}");
                         }
+                        request_file_diagnostics(
+                            &mut service,
+                            &file_for_diagnostics,
+                            &mut diag_state,
+                        );
                         continue;
                     }
                     if notif.method == DidChangeTextDocument::METHOD {
                         let params: crate::types::DidChangeTextDocumentParams =
                             serde_json::from_value(notif.params)?;
+                        let file_for_diagnostics =
+                            uri_to_file_path(params.text_document.uri.as_str())
+                                .unwrap_or_else(|| params.text_document.uri.to_string());
                         let spec = crate::protocol::text_document::did_change::handle(
                             params,
                             service.workspace_root(),
@@ -161,11 +176,17 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
                         {
                             log::warn!("failed to dispatch didChange: {err}");
                         }
+                        request_file_diagnostics(
+                            &mut service,
+                            &file_for_diagnostics,
+                            &mut diag_state,
+                        );
                         continue;
                     }
                     if notif.method == DidCloseTextDocument::METHOD {
                         let params: crate::types::DidCloseTextDocumentParams =
                             serde_json::from_value(notif.params)?;
+                        let uri = params.text_document.uri.clone();
                         let spec = crate::protocol::text_document::did_close::handle(
                             params,
                             service.workspace_root(),
@@ -175,6 +196,7 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
                         {
                             log::warn!("failed to dispatch didClose: {err}");
                         }
+                        clear_client_diagnostics(&connection, uri)?;
                         continue;
                     }
                     if let Some(spec) =
@@ -202,10 +224,22 @@ fn drain_tsserver(
     connection: &Connection,
     service: &mut Service,
     pending: &mut PendingRequests,
+    diag_state: &mut DiagnosticsState,
 ) -> anyhow::Result<()> {
     for event in service.poll_responses() {
-        if let Some(params) = protocol::diagnostics::from_tsserver_event(&event.payload) {
-            publish_diagnostics(connection, params)?;
+        if let Some(diag_event) = protocol::diagnostics::parse_tsserver_event(&event.payload) {
+            diag_state.handle_event(event.server, diag_event);
+            while let Some((uri, diagnostics)) = diag_state.take_ready() {
+                publish_diagnostics(
+                    connection,
+                    PublishDiagnosticsParams {
+                        uri,
+                        diagnostics,
+                        version: None,
+                    },
+                )?;
+            }
+            continue;
         } else if let Some(response) = pending.resolve(event.server, &event.payload)? {
             connection.sender.send(response.into())?;
         } else {
@@ -213,6 +247,33 @@ fn drain_tsserver(
         }
     }
     Ok(())
+}
+
+fn request_file_diagnostics(service: &mut Service, file: &str, diag_state: &mut DiagnosticsState) {
+    let spec = protocol::diagnostics::request_for_file(file);
+    match service.dispatch_request(spec.route, spec.payload, spec.priority) {
+        Ok(receipts) => {
+            for receipt in receipts {
+                diag_state.register_pending(receipt.server, receipt.seq);
+            }
+        }
+        Err(err) => {
+            log::warn!("failed to dispatch geterr for {}: {err}", file);
+        }
+    }
+}
+
+fn clear_client_diagnostics(connection: &Connection, uri_str: String) -> anyhow::Result<()> {
+    let uri =
+        lsp_types::Uri::from_str(&uri_str).context("invalid URI while clearing diagnostics")?;
+    publish_diagnostics(
+        connection,
+        PublishDiagnosticsParams {
+            uri,
+            diagnostics: Vec::new(),
+            version: None,
+        },
+    )
 }
 
 fn publish_diagnostics(
@@ -386,4 +447,70 @@ struct PendingEntry {
     id: RequestId,
     adapter: ResponseAdapter,
     context: Option<Value>,
+}
+
+#[derive(Default)]
+struct DiagnosticsState {
+    pending: HashMap<(ServerKind, u64), HashMap<lsp_types::Uri, Vec<lsp_types::Diagnostic>>>,
+    order: HashMap<ServerKind, VecDeque<u64>>,
+    ready: VecDeque<(lsp_types::Uri, Vec<lsp_types::Diagnostic>)>,
+}
+
+impl DiagnosticsState {
+    fn register_pending(&mut self, server: ServerKind, seq: u64) {
+        self.order
+            .entry(server)
+            .or_insert_with(VecDeque::new)
+            .push_back(seq);
+        self.pending
+            .entry((server, seq))
+            .or_insert_with(HashMap::new);
+    }
+
+    fn handle_event(&mut self, server: ServerKind, event: DiagnosticsEvent) {
+        match event {
+            DiagnosticsEvent::Report {
+                uri,
+                diagnostics,
+                request_seq,
+            } => {
+                let key = request_seq.map(|seq| (server, seq)).or_else(|| {
+                    self.order
+                        .get(&server)
+                        .and_then(|queue| queue.front().copied())
+                        .map(|seq| (server, seq))
+                });
+                if let Some(key) = key {
+                    if let Some(files) = self.pending.get_mut(&key) {
+                        files
+                            .entry(uri.clone())
+                            .or_insert_with(Vec::new)
+                            .extend(diagnostics.clone());
+                        return;
+                    }
+                }
+                if request_seq.is_none() && diagnostics.is_empty() {
+                    return;
+                }
+                self.ready.push_back((uri, diagnostics));
+            }
+            DiagnosticsEvent::Completed { request_seq } => {
+                let key = (server, request_seq);
+                if let Some(files) = self.pending.remove(&key) {
+                    if let Some(queue) = self.order.get_mut(&server) {
+                        if let Some(pos) = queue.iter().position(|seq| *seq == request_seq) {
+                            queue.remove(pos);
+                        }
+                    }
+                    for (uri, diagnostics) in files {
+                        self.ready.push_back((uri, diagnostics));
+                    }
+                }
+            }
+        }
+    }
+
+    fn take_ready(&mut self) -> Option<(lsp_types::Uri, Vec<lsp_types::Diagnostic>)> {
+        self.ready.pop_front()
+    }
 }
