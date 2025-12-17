@@ -1,6 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::Context;
@@ -11,13 +12,17 @@ use lsp_server::{
 };
 use lsp_types::{
     CompletionOptions, HoverProviderCapability, InitializeParams, InitializeResult, OneOf,
-    PositionEncodingKind, PublishDiagnosticsParams, ServerCapabilities, SignatureHelpOptions,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-    TextDocumentSyncSaveOptions, TypeDefinitionProviderCapability,
+    PositionEncodingKind, ProgressParams, ProgressParamsValue, ProgressToken,
+    PublishDiagnosticsParams, ServerCapabilities, SignatureHelpOptions, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions,
+    TypeDefinitionProviderCapability, WorkDoneProgress as LspWorkDoneProgress,
+    WorkDoneProgressBegin, WorkDoneProgressCreateParams, WorkDoneProgressEnd,
+    WorkDoneProgressReport,
     notification::{
         DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument,
-        Notification as LspNotification, PublishDiagnostics,
+        Notification as LspNotification, Progress, PublishDiagnostics,
     },
+    request::{Request as LspRequest, WorkDoneProgressCreate},
 };
 use serde_json::{self, Value};
 
@@ -121,10 +126,24 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
 
     let mut pending = PendingRequests::default();
     let mut diag_state = DiagnosticsState::default();
+    let mut progress = LoadingProgress::new();
+    if let Err(err) = progress.begin(
+        &connection,
+        "ts-lsp-rs",
+        "Booting the TypeScript language service",
+    ) {
+        log::debug!("work-done progress begin failed: {err:?}");
+    }
 
     let poll_interval = Duration::from_millis(10);
     loop {
-        drain_tsserver(&connection, &mut service, &mut pending, &mut diag_state)?;
+        drain_tsserver(
+            &connection,
+            &mut service,
+            &mut pending,
+            &mut diag_state,
+            &mut progress,
+        )?;
 
         match connection.receiver.recv_timeout(poll_interval) {
             Ok(message) => match message {
@@ -155,6 +174,12 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
                         {
                             log::warn!("failed to dispatch didOpen: {err}");
                         }
+                        if let Err(err) = progress.report(
+                            &connection,
+                            &format!("Analyzing {}", friendly_file_name(&file_for_diagnostics)),
+                        ) {
+                            log::debug!("work-done progress report failed: {err:?}");
+                        }
                         request_file_diagnostics(
                             &mut service,
                             &file_for_diagnostics,
@@ -176,6 +201,12 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
                             service.dispatch_request(spec.route, spec.payload, spec.priority)
                         {
                             log::warn!("failed to dispatch didChange: {err}");
+                        }
+                        if let Err(err) = progress.report(
+                            &connection,
+                            &format!("Analyzing {}", friendly_file_name(&file_for_diagnostics)),
+                        ) {
+                            log::debug!("work-done progress report failed: {err:?}");
                         }
                         request_file_diagnostics(
                             &mut service,
@@ -226,6 +257,7 @@ fn drain_tsserver(
     service: &mut Service,
     pending: &mut PendingRequests,
     diag_state: &mut DiagnosticsState,
+    progress: &mut LoadingProgress,
 ) -> anyhow::Result<()> {
     for event in service.poll_responses() {
         if let Some(diag_event) = protocol::diagnostics::parse_tsserver_event(&event.payload) {
@@ -239,6 +271,9 @@ fn drain_tsserver(
                         version: None,
                     },
                 )?;
+                if let Err(err) = progress.end(connection, "Language features ready") {
+                    log::debug!("work-done progress end failed: {err:?}");
+                }
             }
             continue;
         } else if let Some(response) = pending.resolve(event.server, &event.payload)? {
@@ -532,6 +567,113 @@ struct FileDiagnostics {
     syntax: Vec<lsp_types::Diagnostic>,
     semantic: Vec<lsp_types::Diagnostic>,
     suggestion: Vec<lsp_types::Diagnostic>,
+}
+
+struct LoadingProgress {
+    token: ProgressToken,
+    created: bool,
+    active: bool,
+}
+
+impl LoadingProgress {
+    fn new() -> Self {
+        let token = ProgressToken::String(format!("ts-lsp-rs:{}", std::process::id()));
+        Self {
+            token,
+            created: false,
+            active: false,
+        }
+    }
+
+    fn begin(&mut self, connection: &Connection, title: &str, message: &str) -> anyhow::Result<()> {
+        if self.active {
+            return Ok(());
+        }
+        self.ensure_token(connection)?;
+        let params = ProgressParams {
+            token: self.token.clone(),
+            value: ProgressParamsValue::WorkDone(LspWorkDoneProgress::Begin(
+                WorkDoneProgressBegin {
+                    title: title.to_string(),
+                    message: Some(message.to_string()),
+                    ..WorkDoneProgressBegin::default()
+                },
+            )),
+        };
+        send_progress(connection, params)?;
+        self.active = true;
+        Ok(())
+    }
+
+    fn report(&mut self, connection: &Connection, message: &str) -> anyhow::Result<()> {
+        if !self.active {
+            return Ok(());
+        }
+        let params = ProgressParams {
+            token: self.token.clone(),
+            value: ProgressParamsValue::WorkDone(LspWorkDoneProgress::Report(
+                WorkDoneProgressReport {
+                    message: Some(message.to_string()),
+                    ..WorkDoneProgressReport::default()
+                },
+            )),
+        };
+        send_progress(connection, params)
+    }
+
+    fn end(&mut self, connection: &Connection, message: &str) -> anyhow::Result<()> {
+        if !self.active {
+            return Ok(());
+        }
+        let params = ProgressParams {
+            token: self.token.clone(),
+            value: ProgressParamsValue::WorkDone(LspWorkDoneProgress::End(WorkDoneProgressEnd {
+                message: Some(message.to_string()),
+            })),
+        };
+        send_progress(connection, params)?;
+        self.active = false;
+        Ok(())
+    }
+
+    fn ensure_token(&mut self, connection: &Connection) -> anyhow::Result<()> {
+        if self.created {
+            return Ok(());
+        }
+        let params = WorkDoneProgressCreateParams {
+            token: self.token.clone(),
+        };
+        let request = Request::new(
+            next_request_id(),
+            <WorkDoneProgressCreate as LspRequest>::METHOD.to_string(),
+            serde_json::to_value(params)?,
+        );
+        connection.sender.send(Message::Request(request))?;
+        self.created = true;
+        Ok(())
+    }
+}
+
+fn send_progress(connection: &Connection, params: ProgressParams) -> anyhow::Result<()> {
+    let notif =
+        ServerNotification::new(Progress::METHOD.to_string(), serde_json::to_value(params)?);
+    connection.sender.send(Message::Notification(notif))?;
+    Ok(())
+}
+
+static SERVER_REQUEST_IDS: AtomicU64 = AtomicU64::new(1);
+
+fn next_request_id() -> RequestId {
+    let seq = SERVER_REQUEST_IDS.fetch_add(1, Ordering::Relaxed);
+    RequestId::from(format!("ts-lsp-rs-request-{seq}"))
+}
+
+fn friendly_file_name(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(path)
+        .to_string()
 }
 
 impl FileDiagnostics {
