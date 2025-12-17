@@ -1,3 +1,3 @@
 fn main() -> anyhow::Result<()> {
-    ts_lsp_rs::run_stdio_server()
+    ts_bridge::run_stdio_server()
 }

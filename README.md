@@ -1,6 +1,6 @@
-# ts-lsp-rs
+# ts-bridge
 
-`ts-lsp-rs` is a standalone TypeScript language-server shim written in Rust. It
+`ts-bridge` is a standalone TypeScript language-server shim written in Rust. It
 sits between Neovim's built-in LSP client and `tsserver`, translating LSP
 requests into the TypeScript server protocol (and vice‑versa) while offering a
 clear, modular architecture (`config`, `provider`, `process`, `protocol`, etc.)
@@ -12,7 +12,7 @@ that mirrors how modern JS/TS tooling pipelines are organized.
 cargo build --release
 ```
 
-The resulting binary (`target/release/ts-lsp-rs`) can be pointed to from your
+The resulting binary (`target/release/ts-bridge`) can be pointed to from your
 Neovim `lspconfig` setup.
 
 ## LSP Feature Progress

@@ -632,7 +632,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ts-lsp-rs"
+name = "ts-bridge"
 version = "0.1.0"
 dependencies = [
  "anyhow",

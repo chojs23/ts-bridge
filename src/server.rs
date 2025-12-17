@@ -57,7 +57,7 @@ pub fn run_stdio_server() -> anyhow::Result<()> {
     let capabilities = advertised_capabilities();
     let init_result = InitializeResult {
         server_info: Some(lsp_types::ServerInfo {
-            name: "ts-lsp-rs".to_string(),
+            name: "ts-bridge".to_string(),
             version: Some(env!("CARGO_PKG_VERSION").to_string()),
         }),
         capabilities,
@@ -130,7 +130,7 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
     let project_label = friendly_project_name(service.workspace_root());
     if let Err(err) = progress.begin(
         &connection,
-        "ts-lsp-rs",
+        "ts-bridge",
         &format!("Booting {project_label}"),
     ) {
         log::debug!("work-done progress begin failed: {err:?}");
@@ -755,7 +755,7 @@ struct LoadingProgress {
 
 impl LoadingProgress {
     fn new() -> Self {
-        let token = ProgressToken::String(format!("ts-lsp-rs:{}", std::process::id()));
+        let token = ProgressToken::String(format!("ts-bridge:{}", std::process::id()));
         Self {
             token,
             created: false,
@@ -849,7 +849,7 @@ static SERVER_REQUEST_IDS: AtomicU64 = AtomicU64::new(1);
 
 fn next_request_id() -> RequestId {
     let seq = SERVER_REQUEST_IDS.fetch_add(1, Ordering::Relaxed);
-    RequestId::from(format!("ts-lsp-rs-request-{seq}"))
+    RequestId::from(format!("ts-bridge-request-{seq}"))
 }
 
 impl FileDiagnostics {
