@@ -29,7 +29,7 @@ Neovim `lspconfig` setup.
 - [x] `textDocument/publishDiagnostics` streaming
 - [ ] `workspace/didChangeConfiguration`
 - [ ] `textDocument/documentHighlight`
-- [ ] `textDocument/codeAction` / `codeAction/resolve`
+- [x] `textDocument/codeAction` / `codeAction/resolve` (quick fixes, organize imports; refactors pending)
 - [ ] `textDocument/rename` / `workspace/applyEdit`
 - [ ] `textDocument/formatting` / on-type formatting
 - [ ] `textDocument/implementation`
