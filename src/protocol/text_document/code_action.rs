@@ -28,6 +28,8 @@ use crate::utils::{tsserver_file_to_uri, tsserver_range_from_value_lsp, uri_to_f
 pub enum CodeActionData {
     #[serde(rename = "fixAll")]
     FixAll(FixAllData),
+    #[serde(rename = "organizeImports")]
+    OrganizeImports(OrganizeImportsData),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,10 +38,17 @@ pub struct FixAllData {
     pub fix_id: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrganizeImportsData {
+    pub file: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct AdapterContext {
     file: String,
     context: CodeActionContext,
+    #[serde(default, rename = "includeOrganize")]
+    include_organize: bool,
 }
 
 pub fn handle(params: CodeActionParams) -> RequestSpec {
@@ -52,6 +61,35 @@ pub fn handle(params: CodeActionParams) -> RequestSpec {
     } = params;
     let uri = text_document.uri;
     let file = uri_to_file_path(uri.as_str()).unwrap_or_else(|| uri.to_string());
+    let context_only = context.only.clone();
+    let wants_organize = context_only
+        .as_ref()
+        .map(|list| {
+            list.iter()
+                .any(|kind| matches_kind(kind, CodeActionKind::SOURCE_ORGANIZE_IMPORTS.as_str()))
+        })
+        .unwrap_or(false);
+    let wants_quickfix = context_only
+        .as_ref()
+        .map(|list| {
+            list.iter()
+                .any(|kind| matches_kind(kind, CodeActionKind::QUICKFIX.as_str()))
+        })
+        .unwrap_or(true);
+
+    let has_filter = context_only
+        .as_ref()
+        .map(|list| !list.is_empty())
+        .unwrap_or(false);
+
+    if wants_organize && !wants_quickfix {
+        return organize_imports_request(file);
+    }
+
+    // When the client didn't filter (`only` empty/missing), include organize imports alongside
+    // quick fixes so the default picker shows it.
+    let include_organize = wants_organize || !has_filter;
+
     let error_codes = collect_error_codes(&context);
 
     let request = json!({
@@ -69,6 +107,7 @@ pub fn handle(params: CodeActionParams) -> RequestSpec {
     let adapter_context = json!({
         "file": file,
         "context": context,
+        "includeOrganize": include_organize,
     });
 
     RequestSpec {
@@ -77,6 +116,18 @@ pub fn handle(params: CodeActionParams) -> RequestSpec {
         priority: Priority::Normal,
         on_response: Some(adapt_code_actions),
         response_context: Some(adapter_context),
+    }
+}
+
+fn organize_imports_request(file: String) -> RequestSpec {
+    let request = organize_imports_payload(&file);
+
+    RequestSpec {
+        route: Route::Syntax,
+        payload: request,
+        priority: Priority::Low,
+        on_response: Some(adapt_organize_imports),
+        response_context: None,
     }
 }
 
@@ -95,6 +146,12 @@ fn adapt_code_actions(payload: &Value, context: Option<&Value>) -> Result<Value>
             actions.push(CodeActionOrCommand::CodeAction(action));
         }
         if let Some(action) = build_fix_all_action(&fix, &adapter_ctx) {
+            actions.push(CodeActionOrCommand::CodeAction(action));
+        }
+    }
+
+    if adapter_ctx.include_organize {
+        if let Some(action) = organize_imports_placeholder(&adapter_ctx.file) {
             actions.push(CodeActionOrCommand::CodeAction(action));
         }
     }
@@ -144,6 +201,18 @@ fn build_fix_all_action(fix: &Value, ctx: &AdapterContext) -> Option<CodeAction>
     Some(action)
 }
 
+fn organize_imports_placeholder(file: &str) -> Option<CodeAction> {
+    let data = CodeActionData::OrganizeImports(OrganizeImportsData {
+        file: file.to_string(),
+    });
+    Some(CodeAction {
+        title: "Organize Imports".to_string(),
+        kind: Some(CodeActionKind::SOURCE_ORGANIZE_IMPORTS),
+        data: Some(serde_json::to_value(data).ok()?),
+        ..CodeAction::default()
+    })
+}
+
 fn diagnostics_for_action(context: &CodeActionContext) -> Option<Vec<Diagnostic>> {
     if context.diagnostics.is_empty() {
         None
@@ -188,4 +257,44 @@ pub(crate) fn workspace_edit_from_tsserver_changes(changes: &[Value]) -> Option<
             change_annotations: None,
         })
     }
+}
+
+fn adapt_organize_imports(payload: &Value, _context: Option<&Value>) -> Result<Value> {
+    let changes = payload
+        .get("body")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut actions: Vec<CodeActionOrCommand> = Vec::new();
+    if let Some(edit) = workspace_edit_from_tsserver_changes(&changes) {
+        let action = CodeAction {
+            title: "Organize Imports".to_string(),
+            kind: Some(CodeActionKind::SOURCE_ORGANIZE_IMPORTS),
+            edit: Some(edit),
+            ..CodeAction::default()
+        };
+        actions.push(CodeActionOrCommand::CodeAction(action));
+    }
+
+    Ok(serde_json::to_value(CodeActionResponse::from(actions))?)
+}
+
+fn matches_kind(kind: &CodeActionKind, needle: &str) -> bool {
+    let value = kind.as_str();
+    value == needle || value.starts_with(&(needle.to_string() + "."))
+}
+
+pub(crate) fn organize_imports_payload(file: &str) -> Value {
+    json!({
+        "command": "organizeImports",
+        "arguments": {
+            "scope": {
+                "type": "file",
+                "args": {
+                    "file": file,
+                }
+            }
+        }
+    })
 }

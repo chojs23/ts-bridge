@@ -12,7 +12,8 @@ use serde_json::{Value, json};
 
 use crate::protocol::RequestSpec;
 use crate::protocol::text_document::code_action::{
-    CodeActionData, FixAllData, workspace_edit_from_tsserver_changes,
+    CodeActionData, FixAllData, OrganizeImportsData, organize_imports_payload,
+    workspace_edit_from_tsserver_changes,
 };
 use crate::rpc::{Priority, Route};
 
@@ -22,6 +23,7 @@ pub fn handle(mut action: CodeAction) -> Option<RequestSpec> {
 
     match data {
         CodeActionData::FixAll(fix_all) => build_fix_all_request(action, fix_all),
+        CodeActionData::OrganizeImports(data) => build_organize_imports_request(action, data),
     }
 }
 
@@ -50,6 +52,22 @@ fn build_fix_all_request(action: CodeAction, fix_all: FixAllData) -> Option<Requ
     })
 }
 
+fn build_organize_imports_request(
+    action: CodeAction,
+    data: OrganizeImportsData,
+) -> Option<RequestSpec> {
+    let request = organize_imports_payload(&data.file);
+    let context = serde_json::to_value(action).ok()?;
+
+    Some(RequestSpec {
+        route: Route::Syntax,
+        payload: request,
+        priority: Priority::Low,
+        on_response: Some(adapt_organize_imports_response),
+        response_context: Some(context),
+    })
+}
+
 fn adapt_fix_all_response(payload: &Value, context: Option<&Value>) -> Result<Value> {
     let mut action: CodeAction =
         serde_json::from_value(context.cloned().context("missing code action context")?)?;
@@ -69,6 +87,26 @@ fn adapt_fix_all_response(payload: &Value, context: Option<&Value>) -> Result<Va
 
     if action.kind.is_none() {
         action.kind = Some(CodeActionKind::QUICKFIX);
+    }
+
+    Ok(serde_json::to_value(action)?)
+}
+
+fn adapt_organize_imports_response(payload: &Value, context: Option<&Value>) -> Result<Value> {
+    let mut action: CodeAction =
+        serde_json::from_value(context.cloned().context("missing code action context")?)?;
+    let changes = payload
+        .get("body")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    if let Some(edit) = workspace_edit_from_tsserver_changes(&changes) {
+        action.edit = Some(edit);
+    }
+
+    if action.kind.is_none() {
+        action.kind = Some(CodeActionKind::SOURCE_ORGANIZE_IMPORTS);
     }
 
     Ok(serde_json::to_value(action)?)

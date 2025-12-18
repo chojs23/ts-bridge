@@ -98,7 +98,10 @@ fn advertised_capabilities() -> ServerCapabilities {
         ..SignatureHelpOptions::default()
     };
     let code_action_provider = CodeActionProviderCapability::Options(CodeActionOptions {
-        code_action_kinds: Some(vec![CodeActionKind::QUICKFIX]),
+        code_action_kinds: Some(vec![
+            CodeActionKind::QUICKFIX,
+            CodeActionKind::SOURCE_ORGANIZE_IMPORTS,
+        ]),
         resolve_provider: Some(true),
         work_done_progress_options: Default::default(),
     });
