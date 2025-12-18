@@ -11,13 +11,13 @@ use lsp_server::{
     Response,
 };
 use lsp_types::{
-    CompletionOptions, HoverProviderCapability, InitializeParams, InitializeResult, OneOf,
-    PositionEncodingKind, ProgressParams, ProgressParamsValue, ProgressToken,
-    PublishDiagnosticsParams, ServerCapabilities, SignatureHelpOptions, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions,
-    TypeDefinitionProviderCapability, WorkDoneProgress as LspWorkDoneProgress,
-    WorkDoneProgressBegin, WorkDoneProgressCreateParams, WorkDoneProgressEnd,
-    WorkDoneProgressReport,
+    CodeActionKind, CodeActionOptions, CodeActionProviderCapability, CompletionOptions,
+    HoverProviderCapability, InitializeParams, InitializeResult, OneOf, PositionEncodingKind,
+    ProgressParams, ProgressParamsValue, ProgressToken, PublishDiagnosticsParams,
+    ServerCapabilities, SignatureHelpOptions, TextDocumentSyncCapability, TextDocumentSyncKind,
+    TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TypeDefinitionProviderCapability,
+    WorkDoneProgress as LspWorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressCreateParams,
+    WorkDoneProgressEnd, WorkDoneProgressReport,
     notification::{
         DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument,
         Notification as LspNotification, Progress, PublishDiagnostics,
@@ -97,6 +97,11 @@ fn advertised_capabilities() -> ServerCapabilities {
         retrigger_characters: Some(vec![",".into(), ")".into()]),
         ..SignatureHelpOptions::default()
     };
+    let code_action_provider = CodeActionProviderCapability::Options(CodeActionOptions {
+        code_action_kinds: Some(vec![CodeActionKind::QUICKFIX]),
+        resolve_provider: Some(true),
+        work_done_progress_options: Default::default(),
+    });
     ServerCapabilities {
         position_encoding: Some(PositionEncodingKind::UTF16),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
@@ -105,6 +110,7 @@ fn advertised_capabilities() -> ServerCapabilities {
         type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
         completion_provider: Some(completion_provider),
         signature_help_provider: Some(signature_help_provider),
+        code_action_provider: Some(code_action_provider),
         text_document_sync: Some(TextDocumentSyncCapability::Options(text_sync)),
         ..Default::default()
     }

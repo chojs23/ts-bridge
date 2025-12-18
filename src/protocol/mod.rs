@@ -63,6 +63,14 @@ pub fn route_request(method: &str, params: Value) -> Option<RequestSpec> {
             let params: GotoDefinitionParams = serde_json::from_value(params).ok()?;
             Some(text_document::type_definition::handle(params))
         }
+        lsp_types::request::CodeActionRequest::METHOD => {
+            let params: lsp_types::CodeActionParams = serde_json::from_value(params).ok()?;
+            Some(text_document::code_action::handle(params))
+        }
+        lsp_types::request::CodeActionResolveRequest::METHOD => {
+            let action: lsp_types::CodeAction = serde_json::from_value(params).ok()?;
+            text_document::code_action_resolve::handle(action)
+        }
         _ => None,
     }
 }
