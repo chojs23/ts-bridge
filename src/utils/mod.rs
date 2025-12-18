@@ -235,3 +235,86 @@ pub fn completion_commit_characters(kind: CompletionItemKind) -> Option<Vec<Stri
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{Position, Range, TextDocumentContentChangeEvent, TextDocumentItem};
+    use serde_json::json;
+
+    fn range(start_line: u32, start_char: u32, end_line: u32, end_char: u32) -> Range {
+        Range {
+            start: Position {
+                line: start_line,
+                character: start_char,
+            },
+            end: Position {
+                line: end_line,
+                character: end_char,
+            },
+        }
+    }
+
+    #[test]
+    fn lsp_range_to_tsserver_is_one_based() {
+        let input = range(0, 0, 4, 15); // first line/column in LSP space
+        let converted = lsp_range_to_tsserver(&input);
+        assert_eq!(converted.start.line, 1);
+        assert_eq!(converted.start.offset, 1);
+        assert_eq!(converted.end.line, 5);
+        assert_eq!(converted.end.offset, 16);
+    }
+
+    #[test]
+    fn tsserver_text_changes_from_edits_skips_full_sync_edits() {
+        let edits = vec![
+            TextDocumentContentChangeEvent {
+                range: Some(range(1, 2, 1, 5)),
+                text: "foo".to_string(),
+            },
+            TextDocumentContentChangeEvent {
+                range: None,
+                text: "dropped".to_string(),
+            },
+        ];
+
+        let changes = tsserver_text_changes_from_edits(&edits);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(
+            changes[0],
+            json!({
+                "newText": "foo",
+                "start": {"line": 2, "offset": 3},
+                "end": {"line": 2, "offset": 6}
+            })
+        );
+    }
+
+    #[test]
+    fn file_path_uri_roundtrip() {
+        let path = std::env::temp_dir().join("ts-bridge-test.ts");
+        let path_str = path.to_str().expect("temp path is valid utf-8");
+        let uri = file_path_to_uri(path_str).expect("path converts to URI");
+        let roundtrip = uri_to_file_path(uri.as_str()).expect("URI converts back to path");
+        assert_eq!(Path::new(&roundtrip), path);
+    }
+
+    #[test]
+    fn lsp_text_doc_to_tsserver_entry_sets_project_root() {
+        let doc = TextDocumentItem {
+            uri: "file:///tmp/sample.ts".to_string(),
+            language_id: Some("typescript".to_string()),
+            version: 1,
+            text: "const x = 1;".to_string(),
+        };
+        let root = Path::new("/tmp/project-root");
+        let entry = lsp_text_doc_to_tsserver_entry(&doc, Some(root));
+        assert_eq!(entry["file"], json!("/tmp/sample.ts"));
+        assert_eq!(entry["fileContent"], json!("const x = 1;"));
+        assert_eq!(entry["scriptKindName"], json!("TS"));
+        assert_eq!(
+            entry["projectRootPath"],
+            json!(root.to_string_lossy().to_string())
+        );
+    }
+}

@@ -112,8 +112,24 @@ fn advertised_capabilities() -> ServerCapabilities {
 
 #[allow(deprecated)]
 fn workspace_root_from_params(params: &InitializeParams) -> Option<PathBuf> {
+    // Prefer the modern URIs so Neovim/VSCode multi-root setups resolve to
+    // the correct project instead of wherever `ts-bridge` happens to run.
     if let Some(root_path) = &params.root_path {
         return Some(Path::new(root_path).to_path_buf());
+    }
+
+    if let Some(root_uri) = &params.root_uri {
+        if let Some(path) = uri_to_file_path(root_uri.as_str()) {
+            return Some(PathBuf::from(path));
+        }
+    }
+
+    if let Some(folders) = &params.workspace_folders {
+        for folder in folders {
+            if let Some(path) = uri_to_file_path(folder.uri.as_str()) {
+                return Some(PathBuf::from(path));
+            }
+        }
     }
 
     None

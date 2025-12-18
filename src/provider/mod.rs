@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+const MAX_NESTED_SEARCH_DEPTH: usize = 4;
+
 /// Captures everything needed to spawn a tsserver instance.
 #[derive(Debug, Clone)]
 pub struct TsserverBinary {
@@ -62,8 +64,9 @@ impl Provider {
     /// 1. `node_modules/typescript/lib/tsserver.js` in workspace ancestors.
     /// 2. `.yarn/sdks/typescript/lib/tsserver.js` in ancestors.
     /// 3. `tsserver` on PATH (via `which`).
-    pub fn resolve(&self) -> Result<TsserverBinary, ProviderError> {
+    pub fn resolve(&mut self) -> Result<TsserverBinary, ProviderError> {
         if let Some(path) = self.find_local_node_modules() {
+            self.reanchor_workspace_root(&path);
             let plugin_probe = path
                 .parent()
                 .and_then(|lib| lib.parent())
@@ -77,6 +80,7 @@ impl Provider {
         }
 
         if let Some(path) = self.find_yarn_sdk() {
+            self.reanchor_workspace_root(&path);
             let plugin_probe = path
                 .parent()
                 .and_then(|lib| lib.parent())
@@ -103,6 +107,13 @@ impl Provider {
             &self.workspace_root,
             &["node_modules", "typescript", "lib", "tsserver.js"],
         )
+        .or_else(|| {
+            find_nested_match(
+                &self.workspace_root,
+                &["node_modules", "typescript", "lib", "tsserver.js"],
+                MAX_NESTED_SEARCH_DEPTH,
+            )
+        })
     }
 
     fn find_yarn_sdk(&self) -> Option<PathBuf> {
@@ -110,6 +121,13 @@ impl Provider {
             &self.workspace_root,
             &[".yarn", "sdks", "typescript", "lib", "tsserver.js"],
         )
+        .or_else(|| {
+            find_nested_match(
+                &self.workspace_root,
+                &[".yarn", "sdks", "typescript", "lib", "tsserver.js"],
+                MAX_NESTED_SEARCH_DEPTH,
+            )
+        })
     }
 
     fn find_global_tsserver(&self) -> Result<Option<PathBuf>, ProviderError> {
@@ -129,6 +147,24 @@ impl Provider {
 
     pub fn workspace_root(&self) -> &Path {
         &self.workspace_root
+    }
+
+    fn reanchor_workspace_root(&mut self, tsserver_js: &Path) {
+        let Some(mut project_root) = project_root_from_tsserver(tsserver_js) else {
+            return;
+        };
+
+        let should_update = self.workspace_root.starts_with(&project_root)
+            || project_root.starts_with(&self.workspace_root);
+        if !should_update {
+            return;
+        }
+
+        if let Ok(canonical) = project_root.canonicalize() {
+            project_root = canonical;
+        }
+
+        self.workspace_root = project_root;
     }
 }
 
@@ -178,4 +214,77 @@ fn infer_version(tsserver: &Path) -> Option<String> {
     json.get("version")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
+}
+
+fn project_root_from_tsserver(tsserver: &Path) -> Option<PathBuf> {
+    let project = tsserver
+        .parent()? // lib
+        .parent()? // typescript
+        .parent()? // node_modules or sdks
+        .parent()?; // project root
+    Some(project.to_path_buf())
+}
+
+fn find_nested_match(start: &Path, segments: &[&str], max_depth: usize) -> Option<PathBuf> {
+    fn helper(dir: &Path, segments: &[&str], depth: usize, max_depth: usize) -> Option<PathBuf> {
+        if depth > max_depth {
+            return None;
+        }
+
+        let candidate = segments
+            .iter()
+            .fold(PathBuf::from(dir), |mut acc, segment| {
+                acc.push(segment);
+                acc
+            });
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        if depth == max_depth {
+            return None;
+        }
+
+        let entries = match fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(_) => return None,
+        };
+
+        for entry in entries.flatten() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if !file_type.is_dir() || file_type.is_symlink() {
+                continue;
+            }
+            let name = entry.file_name();
+            if let Some(name_str) = name.to_str() {
+                if should_skip_dir(name_str) {
+                    continue;
+                }
+            }
+            if let Some(found) = helper(&entry.path(), segments, depth.saturating_add(1), max_depth)
+            {
+                return Some(found);
+            }
+        }
+
+        None
+    }
+
+    helper(start, segments, 0, max_depth)
+}
+
+fn should_skip_dir(name: &str) -> bool {
+    matches!(
+        name,
+        "node_modules"
+            | ".git"
+            | "target"
+            | "dist"
+            | "build"
+            | ".next"
+            | ".turbo"
+            | ".pnpm"
+            | "vendor"
+    )
 }
