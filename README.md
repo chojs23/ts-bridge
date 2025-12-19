@@ -30,7 +30,7 @@ Neovim `lspconfig` setup.
 - [ ] `workspace/didChangeConfiguration`
 - [ ] `textDocument/documentHighlight`
 - [x] `textDocument/codeAction` / `codeAction/resolve` (quick fixes, organize imports; refactors pending)
-- [ ] `textDocument/rename` / `workspace/applyEdit`
+- [x] `textDocument/rename` / `workspace/applyEdit` (prepare + execute)
 - [ ] `textDocument/formatting` / on-type formatting
 - [ ] `textDocument/implementation`
 - [ ] `workspace/symbol` / `textDocument/documentSymbol`

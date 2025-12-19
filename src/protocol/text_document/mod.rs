@@ -14,5 +14,6 @@ pub mod did_close;
 pub mod did_open;
 pub mod hover;
 pub mod references;
+pub mod rename;
 pub mod signature_help;
 pub mod type_definition;

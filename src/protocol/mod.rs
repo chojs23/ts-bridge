@@ -6,7 +6,7 @@
 //! implementation dynamically transformed method names into module paths; in
 //! Rust we will keep a static registry for clarity and compile-time checking.
 
-use lsp_types::{GotoDefinitionParams, request::Request};
+use lsp_types::{GotoDefinitionParams, TextDocumentPositionParams, request::Request};
 use serde_json::Value;
 
 use crate::rpc::{Priority, Route};
@@ -62,6 +62,14 @@ pub fn route_request(method: &str, params: Value) -> Option<RequestSpec> {
         lsp_types::request::GotoTypeDefinition::METHOD => {
             let params: GotoDefinitionParams = serde_json::from_value(params).ok()?;
             Some(text_document::type_definition::handle(params))
+        }
+        lsp_types::request::PrepareRenameRequest::METHOD => {
+            let params: TextDocumentPositionParams = serde_json::from_value(params).ok()?;
+            Some(text_document::rename::handle_prepare(params))
+        }
+        lsp_types::request::Rename::METHOD => {
+            let params: lsp_types::RenameParams = serde_json::from_value(params).ok()?;
+            Some(text_document::rename::handle(params))
         }
         lsp_types::request::CodeActionRequest::METHOD => {
             let params: lsp_types::CodeActionParams = serde_json::from_value(params).ok()?;
