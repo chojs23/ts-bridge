@@ -1,10 +1,6 @@
 //! =============================================================================
 //! Shared Types
 //! =============================================================================
-//!
-//! The Lua plugin keeps all ad-hoc type annotations in `types.lua`.  This Rust
-//! module mirrors that role so the rest of the crate can share request/response
-//! structs without a web of circular dependencies.
 
 use serde::{Deserialize, Serialize};
 

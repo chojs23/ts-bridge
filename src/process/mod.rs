@@ -3,7 +3,7 @@
 //! =============================================================================
 //!
 //! Tracks child Node processes, implements the `Content-Length` framed protocol,
-//! and exposes cancellation pipes just like the Lua `process.lua`.
+//! and exposes cancellation pipes
 
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Read, Write};

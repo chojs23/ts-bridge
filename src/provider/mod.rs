@@ -4,8 +4,7 @@
 //!
 //! Responsible for locating `tsserver.js` (local node_modules, Yarn SDK, and
 //! PATH/global fallbacks) and reporting metadata (TypeScript version,
-//! plugin probe location).  This mirrors the Lua provider but keeps the search
-//! order deterministic and testable.
+//! plugin probe location).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -42,7 +41,7 @@ pub enum BinarySource {
     GlobalPath,
 }
 
-/// Mirrors the Lua provider by caching the workspace root and lazily resolving
+/// Caching the workspace root and lazily resolving
 /// binaries when the RPC service boots up.
 #[derive(Debug)]
 pub struct Provider {

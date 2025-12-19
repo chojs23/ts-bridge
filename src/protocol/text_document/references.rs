@@ -2,8 +2,7 @@
 //! textDocument/references
 //! =============================================================================
 //!
-//! Parallels the Lua `references.lua` handler by using tsserver’s `references`
-//! command and translating the resulting spans into standard LSP `Location`
+//! Using tsserver’s `references` command and translating the resulting spans into standard LSP `Location`
 //! values. We lean on tsserver’s optional `includeDefinition` flag so the
 //! server itself filters declaration hits whenever the client did not request
 //! them.

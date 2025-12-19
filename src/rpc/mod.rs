@@ -2,9 +2,7 @@
 //! RPC Bridge
 //! =============================================================================
 //!
-//! This layer glues Neovim’s LSP transport to the tsserver processes.  In Lua
-//! this logic lived inside `rpc.lua` and `tsserver.lua`; here we split the
-//! responsibilities into:
+//! This layer glues Neovim’s LSP transport to the tsserver processes.
 //! * request routing (syntax vs semantic)
 //! * request queue/priorities/cancellation
 //! * handler dispatch into the protocol module tree
@@ -45,8 +43,7 @@ impl Service {
         }
     }
 
-    /// Bootstraps tsserver processes once (mirrors Lua’s `TsserverProvider.init`
-    /// + `Tsserver.new` calls).
+    /// Bootstraps tsserver processes once
     pub fn start(&mut self) -> Result<(), ServiceError> {
         let binary = self.provider.resolve().map_err(ServiceError::Provider)?;
         let mut syntax = TsserverProcess::new(ServerKind::Syntax, binary.clone());

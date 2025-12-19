@@ -26,7 +26,7 @@ impl Default for PluginSettings {
     }
 }
 
-/// Diagnostic scheduling mirrors Lua’s `publish_diagnostic_mode`.
+/// Diagnostic scheduling
 #[derive(Debug, Clone, Copy)]
 pub enum DiagnosticPublishMode {
     InsertLeave,

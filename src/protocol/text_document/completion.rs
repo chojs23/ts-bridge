@@ -3,10 +3,7 @@
 //! =============================================================================
 //!
 //! Bridges LSP completion requests to tsserver’s `completionInfo` command and
-//! reshapes the entries into `CompletionList` items. This is a pared-down
-//! version of the Lua completion handler that keeps the essential behavior
-//! (trigger character handling, optional/deprecated labels, auto-import
-//! deprioritization) so Neovim receives meaningful results.
+//! reshapes the entries into `CompletionList` items.
 
 use anyhow::{Context, Result};
 use lsp_types::{

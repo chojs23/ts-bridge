@@ -2,8 +2,8 @@
 //! textDocument/hover
 //! =============================================================================
 //!
-//! Mirrors the Lua `hover.lua` handler by translating the LSP request into a
-//! tsserver `quickinfo` command and shaping the resulting response into an LSP
+//! Translating the LSP request into a tsserver `quickinfo`
+//! command and shaping the resulting response into an LSP
 //! `Hover`. The handler keeps the formatting decisions (code fence for the
 //! `displayString`, plain-text docs, and `_@tag_` renders) so the Neovim UX
 //! matches the original plugin.

@@ -3,8 +3,8 @@
 //! =============================================================================
 //!
 //! Tsserver powers definition requests through the `definitionAndBoundSpan`
-//! command (plus `findSourceDefinition` for source preference).  This handler
-//! mirrors the Lua implementation by converting each returned `FileSpanWithContext`
+//! command (plus `findSourceDefinition` for source preference).
+//! Converting each returned `FileSpanWithContext`
 //! into an LSP `LocationLink` so the client can show peek-definition previews
 //! with context.
 
