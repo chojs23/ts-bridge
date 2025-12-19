@@ -19,7 +19,7 @@ use lsp_types::{
     WorkDoneProgress as LspWorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressCreateParams,
     WorkDoneProgressEnd, WorkDoneProgressReport,
     notification::{
-        DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument,
+        DidChangeConfiguration, DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument,
         Notification as LspNotification, Progress, PublishDiagnostics,
     },
     request::{Request as LspRequest, WorkDoneProgressCreate},
@@ -263,6 +263,18 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
                             log::warn!("failed to dispatch didClose: {err}");
                         }
                         clear_client_diagnostics(&connection, uri)?;
+                        continue;
+                    }
+                    if notif.method == DidChangeConfiguration::METHOD {
+                        let params: lsp_types::DidChangeConfigurationParams =
+                            serde_json::from_value(notif.params)?;
+                        let changed = service
+                            .config_mut()
+                            .apply_workspace_settings(&params.settings);
+                        if changed {
+                            log::info!("workspace settings reloaded from didChangeConfiguration");
+                            // TODO: restart auxiliary tsserver processes when toggles require it.
+                        }
                         continue;
                     }
                     if let Some(spec) =

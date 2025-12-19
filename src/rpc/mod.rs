@@ -169,6 +169,18 @@ impl Service {
         }
         Ok(())
     }
+
+    pub fn update_config(&mut self, new_config: Config) {
+        self.config = new_config;
+    }
+
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    pub fn config_mut(&mut self) -> &mut Config {
+        &mut self.config
+    }
 }
 
 #[derive(thiserror::Error, Debug)]

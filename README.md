@@ -27,8 +27,8 @@ Neovim `lspconfig` setup.
 - [x] `textDocument/completion` (+ `completionItem/resolve`)
 - [x] `textDocument/signatureHelp` (`signatureHelp`)
 - [x] `textDocument/publishDiagnostics` streaming
-- [ ] `workspace/didChangeConfiguration`
-- [ ] `textDocument/documentHighlight`
+- [x] `workspace/didChangeConfiguration`
+- [x] `textDocument/documentHighlight`
 - [x] `textDocument/codeAction` / `codeAction/resolve` (quick fixes, organize imports; refactors pending)
 - [x] `textDocument/rename` / `workspace/applyEdit` (prepare + execute)
 - [ ] `textDocument/formatting` / on-type formatting
