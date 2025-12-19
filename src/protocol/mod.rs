@@ -79,6 +79,11 @@ pub fn route_request(method: &str, params: Value) -> Option<RequestSpec> {
             let action: lsp_types::CodeAction = serde_json::from_value(params).ok()?;
             text_document::code_action_resolve::handle(action)
         }
+        lsp_types::request::Formatting::METHOD => {
+            let params: lsp_types::DocumentFormattingParams =
+                serde_json::from_value(params).ok()?;
+            Some(text_document::formatting::handle(params))
+        }
         _ => None,
     }
 }

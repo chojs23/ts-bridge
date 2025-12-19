@@ -51,7 +51,9 @@ pub fn handle(params: DocumentHighlightParams) -> RequestSpec {
 
 fn adapt_document_highlights(payload: &Value, context: Option<&Value>) -> Result<Value> {
     let ctx: HighlightContext = serde_json::from_value(
-        context.cloned().context("missing documentHighlight context")?,
+        context
+            .cloned()
+            .context("missing documentHighlight context")?,
     )?;
     let items = payload
         .get("body")

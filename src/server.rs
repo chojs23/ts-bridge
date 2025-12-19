@@ -119,6 +119,7 @@ fn advertised_capabilities() -> ServerCapabilities {
         signature_help_provider: Some(signature_help_provider),
         code_action_provider: Some(code_action_provider),
         rename_provider: Some(rename_provider),
+        document_formatting_provider: Some(OneOf::Left(true)),
         text_document_sync: Some(TextDocumentSyncCapability::Options(text_sync)),
         ..Default::default()
     }
