@@ -115,6 +115,8 @@ fn advertised_capabilities() -> ServerCapabilities {
         definition_provider: Some(OneOf::Left(true)),
         references_provider: Some(OneOf::Left(true)),
         type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
+        document_symbol_provider: Some(OneOf::Left(true)),
+        workspace_symbol_provider: Some(OneOf::Left(true)),
         completion_provider: Some(completion_provider),
         signature_help_provider: Some(signature_help_provider),
         code_action_provider: Some(code_action_provider),

@@ -13,6 +13,7 @@ pub mod did_change;
 pub mod did_close;
 pub mod did_open;
 pub mod document_highlight;
+pub mod document_symbol;
 pub mod formatting;
 pub mod hover;
 pub mod references;

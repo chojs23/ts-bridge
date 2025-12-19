@@ -33,7 +33,7 @@ Neovim `lspconfig` setup.
 - [x] `textDocument/rename` / `workspace/applyEdit` (prepare + execute)
 - [x] `textDocument/formatting` / on-type formatting
 - [ ] `textDocument/implementation`
-- [ ] `workspace/symbol` / `textDocument/documentSymbol`
+- [x] `workspace/symbol` / `textDocument/documentSymbol`
 - [ ] Semantic tokens
 - [ ] Inlay hints
 - [ ] Code lens

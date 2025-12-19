@@ -13,6 +13,7 @@ use crate::rpc::{Priority, Route};
 
 pub mod diagnostics;
 pub mod text_document;
+pub mod workspace;
 
 pub type ResponseAdapter = fn(&Value, Option<&Value>) -> anyhow::Result<Value>;
 
@@ -83,6 +84,10 @@ pub fn route_request(method: &str, params: Value) -> Option<RequestSpec> {
             let params: lsp_types::DocumentFormattingParams =
                 serde_json::from_value(params).ok()?;
             Some(text_document::formatting::handle(params))
+        }
+        lsp_types::request::WorkspaceSymbolRequest::METHOD => {
+            let params: lsp_types::WorkspaceSymbolParams = serde_json::from_value(params).ok()?;
+            Some(workspace::symbol::handle(params))
         }
         _ => None,
     }
