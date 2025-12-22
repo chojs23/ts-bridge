@@ -6,7 +6,7 @@
 //! inside a file and translates it into LSP `DocumentSymbol` entries.
 
 use anyhow::{Context, Result};
-use lsp_types::{DocumentSymbol, DocumentSymbolParams, SymbolKind};
+use lsp_types::{DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse, SymbolKind};
 use serde_json::{Value, json};
 
 use crate::protocol::RequestSpec;
@@ -53,7 +53,8 @@ fn adapt_document_symbols(payload: &Value, _context: Option<&Value>) -> Result<V
         }
     }
 
-    Ok(serde_json::to_value(symbols)?)
+    let response = DocumentSymbolResponse::Nested(symbols);
+    Ok(serde_json::to_value(response)?)
 }
 
 fn build_symbol(node: &Value) -> Option<DocumentSymbol> {

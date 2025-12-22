@@ -109,6 +109,15 @@ fn advertised_capabilities() -> ServerCapabilities {
         prepare_provider: Some(true),
         work_done_progress_options: Default::default(),
     });
+    let semantic_tokens_provider =
+        lsp_types::SemanticTokensServerCapabilities::SemanticTokensOptions(
+            lsp_types::SemanticTokensOptions {
+                legend: crate::protocol::text_document::semantic_tokens::legend(),
+                range: Some(true),
+                full: Some(lsp_types::SemanticTokensFullOptions::Bool(true)),
+                work_done_progress_options: Default::default(),
+            },
+        );
     ServerCapabilities {
         position_encoding: Some(PositionEncodingKind::UTF16),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
@@ -122,6 +131,7 @@ fn advertised_capabilities() -> ServerCapabilities {
         code_action_provider: Some(code_action_provider),
         rename_provider: Some(rename_provider),
         document_formatting_provider: Some(OneOf::Left(true)),
+        semantic_tokens_provider: Some(semantic_tokens_provider),
         text_document_sync: Some(TextDocumentSyncCapability::Options(text_sync)),
         ..Default::default()
     }

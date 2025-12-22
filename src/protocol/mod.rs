@@ -64,6 +64,14 @@ pub fn route_request(method: &str, params: Value) -> Option<RequestSpec> {
             let params: GotoDefinitionParams = serde_json::from_value(params).ok()?;
             Some(text_document::type_definition::handle(params))
         }
+        lsp_types::request::GotoImplementation::METHOD => {
+            let params: GotoDefinitionParams = serde_json::from_value(params).ok()?;
+            Some(text_document::implementation::handle(params))
+        }
+        lsp_types::request::DocumentSymbolRequest::METHOD => {
+            let params: lsp_types::DocumentSymbolParams = serde_json::from_value(params).ok()?;
+            Some(text_document::document_symbol::handle(params))
+        }
         lsp_types::request::PrepareRenameRequest::METHOD => {
             let params: TextDocumentPositionParams = serde_json::from_value(params).ok()?;
             Some(text_document::rename::handle_prepare(params))
@@ -84,6 +92,15 @@ pub fn route_request(method: &str, params: Value) -> Option<RequestSpec> {
             let params: lsp_types::DocumentFormattingParams =
                 serde_json::from_value(params).ok()?;
             Some(text_document::formatting::handle(params))
+        }
+        lsp_types::request::SemanticTokensFullRequest::METHOD => {
+            let params: lsp_types::SemanticTokensParams = serde_json::from_value(params).ok()?;
+            Some(text_document::semantic_tokens::handle_full(params))
+        }
+        lsp_types::request::SemanticTokensRangeRequest::METHOD => {
+            let params: lsp_types::SemanticTokensRangeParams =
+                serde_json::from_value(params).ok()?;
+            Some(text_document::semantic_tokens::handle_range(params))
         }
         lsp_types::request::WorkspaceSymbolRequest::METHOD => {
             let params: lsp_types::WorkspaceSymbolParams = serde_json::from_value(params).ok()?;
