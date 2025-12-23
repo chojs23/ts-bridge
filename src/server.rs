@@ -50,7 +50,12 @@ pub fn run_stdio_server() -> anyhow::Result<()> {
 
     let workspace_root =
         workspace_root_from_params(&params).unwrap_or_else(|| std::env::current_dir().unwrap());
-    let config = Config::new(PluginSettings::default());
+    let mut config = Config::new(PluginSettings::default());
+    if let Some(options) = params.initialization_options.as_ref() {
+        if config.apply_workspace_settings(options) {
+            log::info!("applied initializationOptions to ts-bridge settings");
+        }
+    }
     let provider = Provider::new(workspace_root);
     let service = Service::new(config, provider);
 
@@ -163,10 +168,6 @@ fn workspace_root_from_params(params: &InitializeParams) -> Option<PathBuf> {
 }
 
 fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()> {
-    if let Err(err) = service.start() {
-        log::warn!("failed to start tsserver processes: {err:?}");
-    }
-
     let mut pending = PendingRequests::default();
     let mut diag_state = DiagnosticsState::default();
     let mut progress = LoadingProgress::new();

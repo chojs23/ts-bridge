@@ -6,6 +6,8 @@
 //! jsx helpers, tsserver memory limits, etc.) and exposes typed structures that
 //! other subsystems borrow.
 
+use std::path::PathBuf;
+
 use serde_json::{Map, Value};
 
 /// Settings that are evaluated once during plugin setup (analogous to the Lua
@@ -17,6 +19,8 @@ pub struct PluginSettings {
     /// Determines when diagnostics are requested (`"insert_leave"` vs
     /// `"change"` originally); kept simple for now.
     pub publish_diagnostic_on: DiagnosticPublishMode,
+    /// Launch arguments and logging preferences forwarded to tsserver.
+    pub tsserver: TsserverLaunchOptions,
 }
 
 impl Default for PluginSettings {
@@ -24,6 +28,7 @@ impl Default for PluginSettings {
         Self {
             separate_diagnostic_server: true,
             publish_diagnostic_on: DiagnosticPublishMode::InsertLeave,
+            tsserver: TsserverLaunchOptions::default(),
         }
     }
 }
@@ -91,14 +96,7 @@ fn apply_settings_tree(value: &Value, plugin: &mut PluginSettings) -> bool {
     changed
 }
 
-const POSSIBLE_SETTING_ROOTS: &[&str] = &[
-    "ts-bridge",
-    "tsBridge",
-    "tsbridge",
-    "ts_bridge",
-    "typescript-tools",
-    "typescriptTools",
-];
+const POSSIBLE_SETTING_ROOTS: &[&str] = &["ts-bridge", "tsBridge", "tsbridge", "ts_bridge"];
 
 impl PluginSettings {
     fn update_from_map(&mut self, map: &Map<String, Value>) -> bool {
@@ -122,6 +120,147 @@ impl PluginSettings {
             }
         }
 
+        if let Some(tsserver) = map.get("tsserver") {
+            changed |= self.tsserver.update_from_value(tsserver);
+        }
+
         changed
+    }
+}
+
+/// Launch-related knobs for the underlying `tsserver` Node process.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TsserverLaunchOptions {
+    pub locale: Option<String>,
+    pub log_directory: Option<PathBuf>,
+    pub log_verbosity: Option<TsserverLogVerbosity>,
+    pub max_old_space_size: Option<u32>,
+    pub global_plugins: Vec<String>,
+    pub plugin_probe_dirs: Vec<PathBuf>,
+    pub extra_args: Vec<String>,
+}
+
+impl TsserverLaunchOptions {
+    fn update_from_value(&mut self, value: &Value) -> bool {
+        let map = match value.as_object() {
+            Some(map) => map,
+            None => return false,
+        };
+        let mut changed = false;
+
+        if map.contains_key("locale") {
+            let next = map
+                .get("locale")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            if self.locale != next {
+                self.locale = next;
+                changed = true;
+            }
+        }
+
+        if map.contains_key("log_directory") {
+            let next = map
+                .get("log_directory")
+                .and_then(|v| v.as_str())
+                .map(PathBuf::from);
+            if self.log_directory != next {
+                self.log_directory = next;
+                changed = true;
+            }
+        }
+
+        if map.contains_key("log_verbosity") {
+            let next = map
+                .get("log_verbosity")
+                .and_then(|v| v.as_str())
+                .and_then(TsserverLogVerbosity::from_str);
+            if self.log_verbosity != next {
+                self.log_verbosity = next;
+                changed = true;
+            }
+        }
+
+        if map.contains_key("max_old_space_size") {
+            let next = map
+                .get("max_old_space_size")
+                .and_then(|v| v.as_u64())
+                .and_then(|v| v.try_into().ok());
+            if self.max_old_space_size != next {
+                self.max_old_space_size = next;
+                changed = true;
+            }
+        }
+
+        if let Some(list) = map
+            .get("global_plugins")
+            .and_then(|value| string_list(value))
+        {
+            if self.global_plugins != list {
+                self.global_plugins = list;
+                changed = true;
+            }
+        }
+
+        if let Some(list) = map
+            .get("plugin_probe_dirs")
+            .and_then(|value| string_list(value))
+            .map(|entries| entries.into_iter().map(PathBuf::from).collect::<Vec<_>>())
+        {
+            if self.plugin_probe_dirs != list {
+                self.plugin_probe_dirs = list;
+                changed = true;
+            }
+        }
+
+        if let Some(list) = map.get("extra_args").and_then(|value| string_list(value)) {
+            if self.extra_args != list {
+                self.extra_args = list;
+                changed = true;
+            }
+        }
+
+        changed
+    }
+}
+
+fn string_list(value: &Value) -> Option<Vec<String>> {
+    let array = value.as_array()?;
+    let mut result = Vec::with_capacity(array.len());
+    for entry in array {
+        let Some(text) = entry.as_str() else {
+            continue;
+        };
+        result.push(text.to_string());
+    }
+    Some(result)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TsserverLogVerbosity {
+    Terse,
+    Normal,
+    RequestTime,
+    Verbose,
+}
+
+impl TsserverLogVerbosity {
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "terse" => Some(Self::Terse),
+            "normal" => Some(Self::Normal),
+            "requestTime" | "request_time" => Some(Self::RequestTime),
+            "verbose" => Some(Self::Verbose),
+            _ => None,
+        }
+    }
+
+    pub fn as_cli_flag(&self) -> &'static str {
+        match self {
+            Self::Terse => "terse",
+            Self::Normal => "normal",
+            Self::RequestTime => "requestTime",
+            Self::Verbose => "verbose",
+        }
     }
 }

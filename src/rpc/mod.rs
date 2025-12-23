@@ -46,13 +46,14 @@ impl Service {
     /// Bootstraps tsserver processes once
     pub fn start(&mut self) -> Result<(), ServiceError> {
         let binary = self.provider.resolve().map_err(ServiceError::Provider)?;
-        let mut syntax = TsserverProcess::new(ServerKind::Syntax, binary.clone());
+        let launch = self.config.plugin().tsserver.clone();
+        let mut syntax = TsserverProcess::new(ServerKind::Syntax, binary.clone(), launch.clone());
         syntax.start().map_err(ServiceError::Process)?;
         self.syntax_rx = syntax.response_rx();
         self.syntax = Some(syntax);
 
         if self.config.plugin().separate_diagnostic_server {
-            let mut semantic = TsserverProcess::new(ServerKind::Semantic, binary);
+            let mut semantic = TsserverProcess::new(ServerKind::Semantic, binary, launch);
             semantic.start().map_err(ServiceError::Process)?;
             self.semantic_rx = semantic.response_rx();
             self.semantic = Some(semantic);

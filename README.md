@@ -40,3 +40,37 @@ Neovim `lspconfig` setup.
 - [ ] Custom commands / user APIs (organize imports, fix missing imports, etc.)
 - [ ] Test harness (port of busted/Plenary suite)
 - [ ] Dual-process (semantic diagnostics server) feature gating _(🚧 experimental)_
+
+## Configuration
+
+`ts-bridge` works out of the box, but here’s a minimal Neovim `lspconfig`
+snippet that wires the server up with all default options spelled out so you can
+override only what you need later:
+
+```lua
+local lspconfig = require("lspconfig")
+
+lspconfig.ts_bridge.setup({
+  cmd = { "/path/to/ts-bridge" },
+  init_options = {
+    ["ts-bridge"] = {
+      separate_diagnostic_server = true,      -- launch syntax + semantic tsserver
+      publish_diagnostic_on = "insert_leave",
+      tsserver = {
+        locale = nil,
+        log_directory = nil,
+        log_verbosity = nil,
+        max_old_space_size = nil,
+        global_plugins = {},
+        plugin_probe_dirs = {},
+        extra_args = {},
+      },
+    },
+  },
+})
+```
+
+Because `ts-bridge` delays spawning `tsserver` until the first routed request,
+these defaults (or any overrides you make) apply to both syntax and semantic
+processes before they boot. Restart your LSP client after changing the snippet
+so a fresh tsserver picks up the new arguments.

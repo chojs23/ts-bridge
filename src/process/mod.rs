@@ -5,7 +5,7 @@
 //! Tracks child Node processes, implements the `Content-Length` framed protocol,
 //! and exposes cancellation pipes
 
-use std::fs::OpenOptions;
+use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::thread;
@@ -14,20 +14,23 @@ use crossbeam_channel::{Receiver, Sender, unbounded};
 use serde_json::Value;
 use tempfile::TempDir;
 
+use crate::config::TsserverLaunchOptions;
 use crate::provider::TsserverBinary;
 
 /// Represents an owned tsserver instance (syntax or semantic).
 pub struct TsserverProcess {
     kind: ServerKind,
     binary: TsserverBinary,
+    launch: TsserverLaunchOptions,
     child: Option<ChildHandles>,
 }
 
 impl TsserverProcess {
-    pub fn new(kind: ServerKind, binary: TsserverBinary) -> Self {
+    pub fn new(kind: ServerKind, binary: TsserverBinary, launch: TsserverLaunchOptions) -> Self {
         Self {
             kind,
             binary,
+            launch,
             child: None,
         }
     }
@@ -44,7 +47,9 @@ impl TsserverProcess {
             ServerKind::Semantic => "semantic",
         };
         command.env("TS_LSP_RS_SERVER_KIND", server_label);
+        self.apply_node_args(&mut command);
         command.arg(&self.binary.executable);
+        self.apply_tsserver_args(&mut command)?;
         command.arg("--stdio");
         command.stdin(Stdio::piped());
         command.stdout(Stdio::piped());
@@ -67,6 +72,68 @@ impl TsserverProcess {
         });
 
         Ok(())
+    }
+
+    fn apply_node_args(&self, command: &mut Command) {
+        if let Some(limit) = self.launch.max_old_space_size {
+            command.arg(format!("--max-old-space-size={limit}"));
+        }
+    }
+
+    fn apply_tsserver_args(&self, command: &mut Command) -> Result<(), ProcessError> {
+        if let Some(locale) = &self.launch.locale {
+            command.arg("--locale");
+            command.arg(locale);
+        }
+
+        if let Some(log_file) = self.prepare_log_file()? {
+            command.arg("--logFile");
+            command.arg(log_file);
+            if let Some(verbosity) = self.launch.log_verbosity {
+                command.arg("--logVerbosity");
+                command.arg(verbosity.as_cli_flag());
+            }
+        } else if let Some(verbosity) = self.launch.log_verbosity {
+            log::warn!(
+                "tsserver log verbosity {:?} ignored (log_directory not configured)",
+                verbosity
+            );
+        }
+
+        let mut probe_locations = Vec::new();
+        if let Some(binary_probe) = &self.binary.plugin_probe {
+            probe_locations.push(binary_probe.clone());
+        }
+        probe_locations.extend(self.launch.plugin_probe_dirs.iter().cloned());
+        for location in probe_locations {
+            command.arg("--pluginProbeLocations");
+            command.arg(location);
+        }
+
+        for plugin in &self.launch.global_plugins {
+            command.arg("--globalPlugins");
+            command.arg(plugin);
+        }
+
+        for arg in &self.launch.extra_args {
+            command.arg(arg);
+        }
+
+        Ok(())
+    }
+
+    fn prepare_log_file(&self) -> Result<Option<std::path::PathBuf>, ProcessError> {
+        let Some(dir) = &self.launch.log_directory else {
+            return Ok(None);
+        };
+        fs::create_dir_all(dir).map_err(ProcessError::LogDirectory)?;
+        let mut path = dir.clone();
+        let suffix = match self.kind {
+            ServerKind::Syntax => "syntax",
+            ServerKind::Semantic => "semantic",
+        };
+        path.push(format!("tsserver.{suffix}.log"));
+        Ok(Some(path))
     }
 
     /// Sends a JSON payload to tsserver using the newline-delimited framing that
@@ -198,4 +265,6 @@ pub enum ProcessError {
     InvalidHeader,
     #[error("io error while reading tsserver stdout: {0}")]
     Read(std::io::Error),
+    #[error("failed to prepare tsserver log directory: {0}")]
+    LogDirectory(std::io::Error),
 }
