@@ -32,9 +32,9 @@ Neovim `lspconfig` setup.
 - [x] `textDocument/codeAction` / `codeAction/resolve` (quick fixes, organize imports; refactors pending)
 - [x] `textDocument/rename` / `workspace/applyEdit` (prepare + execute)
 - [x] `textDocument/formatting` / on-type formatting
-- [ ] `textDocument/implementation`
+- [x] `textDocument/implementation`
 - [x] `workspace/symbol` / `textDocument/documentSymbol`
-- [ ] Semantic tokens
+- [x] Semantic tokens
 - [ ] Inlay hints
 - [ ] Code lens
 - [ ] Custom commands / user APIs (organize imports, fix missing imports, etc.)
