@@ -7,7 +7,7 @@ use crate::utils::{file_path_to_uri, tsserver_range_from_value_lsp};
 
 const REQUEST_COMPLETED: &str = "requestCompleted";
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticsKind {
     Syntax,
     Semantic,
@@ -117,5 +117,68 @@ fn map_severity(category: Option<&str>) -> Option<DiagnosticSeverity> {
         Some("suggestion") => Some(DiagnosticSeverity::HINT),
         Some("message") => Some(DiagnosticSeverity::INFORMATION),
         _ => Some(DiagnosticSeverity::WARNING),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_for_file_targets_both_servers() {
+        let spec = request_for_file("/workspace/foo.ts");
+        assert_eq!(spec.route, Route::Both);
+        let files = spec
+            .payload
+            .get("arguments")
+            .and_then(|args| args.get("files"))
+            .and_then(|entry| entry.as_array())
+            .expect("files not present");
+        assert_eq!(files, &[json!("/workspace/foo.ts")]);
+    }
+
+    #[test]
+    fn parse_tsserver_event_converts_diagnostics() {
+        let payload = json!({
+            "type": "event",
+            "event": "semanticDiag",
+            "body": {
+                "file": "/workspace/foo.ts",
+                "request_seq": 7,
+                "diagnostics": [{
+                    "start": { "line": 1, "offset": 1 },
+                    "end": { "line": 1, "offset": 4 },
+                    "text": "oops",
+                    "category": "error",
+                    "code": 123,
+                }]
+            }
+        });
+
+        match parse_tsserver_event(&payload) {
+            Some(DiagnosticsEvent::Report { uri, diagnostics, request_seq, kind }) => {
+                assert_eq!(kind, DiagnosticsKind::Semantic);
+                assert_eq!(request_seq, Some(7));
+                assert_eq!(uri.to_string(), "file:///workspace/foo.ts");
+                assert_eq!(diagnostics.len(), 1);
+                assert_eq!(diagnostics[0].message, "oops");
+                assert_eq!(diagnostics[0].severity, Some(DiagnosticSeverity::ERROR));
+            }
+            other => panic!("unexpected diagnostics event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_tsserver_event_detects_completion_events() {
+        let payload = json!({
+            "type": "event",
+            "event": "requestCompleted",
+            "body": { "request_seq": 99 }
+        });
+
+        match parse_tsserver_event(&payload) {
+            Some(DiagnosticsEvent::Completed { request_seq }) => assert_eq!(request_seq, 99),
+            other => panic!("expected completion event, got {other:?}"),
+        }
     }
 }
