@@ -235,7 +235,10 @@ mod tests {
     };
     use std::str::FromStr;
 
-    fn params_with_context(trigger: SignatureHelpTriggerKind, is_retrigger: bool) -> SignatureHelpParams {
+    fn params_with_context(
+        trigger: SignatureHelpTriggerKind,
+        is_retrigger: bool,
+    ) -> SignatureHelpParams {
         SignatureHelpParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier {
@@ -271,9 +274,20 @@ mod tests {
         assert_eq!(args.get("line").and_then(|v| v.as_u64()), Some(4));
         assert_eq!(args.get("offset").and_then(|v| v.as_u64()), Some(9));
         let trigger_reason = args.get("triggerReason").expect("trigger reason missing");
-        assert_eq!(trigger_reason.get("kind").and_then(|v| v.as_str()), Some("characterTyped"));
-        assert_eq!(trigger_reason.get("triggerCharacter").and_then(|v| v.as_str()), Some("("));
-        assert_eq!(trigger_reason.get("isRetrigger").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(
+            trigger_reason.get("kind").and_then(|v| v.as_str()),
+            Some("characterTyped")
+        );
+        assert_eq!(
+            trigger_reason
+                .get("triggerCharacter")
+                .and_then(|v| v.as_str()),
+            Some("(")
+        );
+        assert_eq!(
+            trigger_reason.get("isRetrigger").and_then(|v| v.as_bool()),
+            Some(false)
+        );
     }
 
     #[test]
@@ -307,7 +321,10 @@ mod tests {
         assert!(sig.documentation.is_some());
         let params = sig.parameters.as_ref().expect("parameters present");
         assert_eq!(params.len(), 1);
-        assert_eq!(params[0].label, ParameterLabel::Simple("bar: string".into()));
+        assert_eq!(
+            params[0].label,
+            ParameterLabel::Simple("bar: string".into())
+        );
         assert_eq!(parsed.active_signature, Some(1));
         assert_eq!(parsed.active_parameter, Some(0));
     }

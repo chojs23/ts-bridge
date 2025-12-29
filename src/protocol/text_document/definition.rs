@@ -168,7 +168,10 @@ mod tests {
     #[test]
     fn handle_uses_source_definition_command_when_context_requests_it() {
         let spec = handle(params_with_context(true));
-        assert_eq!(spec.payload.get("command"), Some(&json!(CMD_SOURCE_DEFINITION)));
+        assert_eq!(
+            spec.payload.get("command"),
+            Some(&json!(CMD_SOURCE_DEFINITION))
+        );
     }
 
     #[test]
@@ -206,7 +209,10 @@ mod tests {
                 assert_eq!(target_selection_range.start.line, 9);
                 assert_eq!(target_selection_range.start.character, 1);
                 assert_eq!(target_range.start.line, 8);
-                assert_eq!(origin_selection_range.as_ref().map(|r| r.start.line), Some(2));
+                assert_eq!(
+                    origin_selection_range.as_ref().map(|r| r.start.line),
+                    Some(2)
+                );
             }
             _ => panic!("expected link response"),
         }

@@ -130,10 +130,12 @@ fn advertised_capabilities(settings: &PluginSettings) -> ServerCapabilities {
             },
         );
     let inlay_hint_provider = if settings.enable_inlay_hints {
-        Some(OneOf::Right(InlayHintServerCapabilities::Options(InlayHintOptions {
-            work_done_progress_options: Default::default(),
-            resolve_provider: None,
-        })))
+        Some(OneOf::Right(InlayHintServerCapabilities::Options(
+            InlayHintOptions {
+                work_done_progress_options: Default::default(),
+                resolve_provider: None,
+            },
+        )))
     } else {
         None
     };

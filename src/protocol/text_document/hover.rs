@@ -135,8 +135,8 @@ fn render_tags(tags_value: &Value) -> Option<String> {
 mod tests {
     use super::*;
     use lsp_types::{
-        HoverParams, Hover as LspHover, Position, TextDocumentIdentifier, TextDocumentPositionParams,
-        Uri,
+        Hover as LspHover, HoverParams, Position, TextDocumentIdentifier,
+        TextDocumentPositionParams, Uri,
     };
     use std::str::FromStr;
 
@@ -158,10 +158,7 @@ mod tests {
         let spec = handle(params);
         assert_eq!(spec.route, Route::Syntax);
         assert_eq!(spec.priority, Priority::Normal);
-        let args = spec
-            .payload
-            .get("arguments")
-            .expect("arguments missing");
+        let args = spec.payload.get("arguments").expect("arguments missing");
         assert_eq!(
             args.get("file").and_then(|v| v.as_str()),
             Some("/workspace/foo.ts")

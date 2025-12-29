@@ -156,7 +156,12 @@ mod tests {
         });
 
         match parse_tsserver_event(&payload) {
-            Some(DiagnosticsEvent::Report { uri, diagnostics, request_seq, kind }) => {
+            Some(DiagnosticsEvent::Report {
+                uri,
+                diagnostics,
+                request_seq,
+                kind,
+            }) => {
                 assert_eq!(kind, DiagnosticsKind::Semantic);
                 assert_eq!(request_seq, Some(7));
                 assert_eq!(uri.to_string(), "file:///workspace/foo.ts");
