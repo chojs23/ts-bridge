@@ -206,7 +206,7 @@ pub struct DispatchReceipt {
     pub seq: u64,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Route {
     Syntax,
     Semantic,

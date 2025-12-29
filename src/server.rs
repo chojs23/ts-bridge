@@ -157,6 +157,42 @@ fn advertised_capabilities(settings: &PluginSettings) -> ServerCapabilities {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn advertised_capabilities_include_inlay_hints_when_enabled() {
+        let settings = PluginSettings::default();
+        let caps = advertised_capabilities(&settings);
+
+        assert!(caps.inlay_hint_provider.is_some());
+        assert_eq!(
+            caps.position_encoding,
+            Some(PositionEncodingKind::UTF16),
+            "initialize should advertise UTF-16 positions"
+        );
+        match caps.text_document_sync {
+            Some(TextDocumentSyncCapability::Options(options)) => {
+                assert_eq!(options.change, Some(TextDocumentSyncKind::INCREMENTAL));
+            }
+            other => panic!("unexpected sync capability: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn advertised_capabilities_disable_inlay_hints_when_setting_is_false() {
+        let mut settings = PluginSettings::default();
+        settings.enable_inlay_hints = false;
+
+        let caps = advertised_capabilities(&settings);
+        assert!(
+            caps.inlay_hint_provider.is_none(),
+            "initialize must omit inlay hint capability when disabled"
+        );
+    }
+}
+
 #[allow(deprecated)]
 fn workspace_root_from_params(params: &InitializeParams) -> Option<PathBuf> {
     // Prefer the modern URIs so Neovim/VSCode multi-root setups resolve to

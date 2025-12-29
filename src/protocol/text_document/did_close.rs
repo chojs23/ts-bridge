@@ -21,8 +21,36 @@ pub fn handle(params: DidCloseTextDocumentParams, workspace_root: &Path) -> Noti
     });
 
     NotificationSpec {
-        route: Route::Syntax,
+        route: Route::Both,
         payload: request,
         priority: Priority::Const,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{DidCloseTextDocumentParams, TextDocumentIdentifier};
+
+    #[test]
+    fn did_close_routes_to_both_servers() {
+        let params = DidCloseTextDocumentParams {
+            text_document: TextDocumentIdentifier {
+                uri: "file:///workspace/foo.ts".into(),
+            },
+        };
+        let root = Path::new("/workspace");
+        let spec = handle(params, root);
+
+        assert_eq!(spec.route, Route::Both);
+        let closed = spec
+            .payload
+            .get("arguments")
+            .and_then(|args| args.get("closedFiles"))
+            .and_then(|value| value.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|value| value.as_str())
+            .expect("closed file missing");
+        assert_eq!(closed, "/workspace/foo.ts");
     }
 }
