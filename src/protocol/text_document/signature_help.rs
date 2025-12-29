@@ -226,6 +226,93 @@ fn render_documentation(docs: Option<&Value>, tags: Option<&Value>) -> Option<St
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lsp_types::{
+        SignatureHelp as LspSignatureHelp, SignatureHelpTriggerKind, TextDocumentIdentifier,
+        TextDocumentPositionParams, Uri,
+    };
+    use std::str::FromStr;
+
+    fn params_with_context(trigger: SignatureHelpTriggerKind, is_retrigger: bool) -> SignatureHelpParams {
+        SignatureHelpParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Uri::from_str("file:///workspace/main.ts").unwrap(),
+                },
+                position: lsp_types::Position {
+                    line: 3,
+                    character: 8,
+                },
+            },
+            context: Some(SignatureHelpContext {
+                trigger_kind: trigger,
+                trigger_character: Some("(".into()),
+                is_retrigger,
+                active_signature_help: None,
+            }),
+            work_done_progress_params: Default::default(),
+        }
+    }
+
+    #[test]
+    fn handle_builds_signature_help_request_with_trigger_reason() {
+        let params = params_with_context(SignatureHelpTriggerKind::TRIGGER_CHARACTER, false);
+        let spec = handle(params);
+        assert_eq!(spec.route, Route::Syntax);
+        assert_eq!(spec.priority, Priority::Normal);
+        assert_eq!(spec.payload.get("command"), Some(&json!("signatureHelp")));
+        let args = spec.payload.get("arguments").expect("arguments missing");
+        assert_eq!(
+            args.get("file").and_then(|v| v.as_str()),
+            Some("/workspace/main.ts")
+        );
+        assert_eq!(args.get("line").and_then(|v| v.as_u64()), Some(4));
+        assert_eq!(args.get("offset").and_then(|v| v.as_u64()), Some(9));
+        let trigger_reason = args.get("triggerReason").expect("trigger reason missing");
+        assert_eq!(trigger_reason.get("kind").and_then(|v| v.as_str()), Some("characterTyped"));
+        assert_eq!(trigger_reason.get("triggerCharacter").and_then(|v| v.as_str()), Some("("));
+        assert_eq!(trigger_reason.get("isRetrigger").and_then(|v| v.as_bool()), Some(false));
+    }
+
+    #[test]
+    fn adapt_signature_help_converts_items() {
+        let payload = json!({
+            "body": {
+                "selectedItemIndex": 1,
+                "argumentIndex": 0,
+                "items": [{
+                    "prefixDisplayParts": [{ "text": "function foo" }, { "text": "(" }],
+                    "parameters": [{
+                        "displayParts": [{ "text": "bar: string" }],
+                        "documentation": [{ "text": "name" }]
+                    }],
+                    "suffixDisplayParts": [{ "text": ")" }],
+                    "documentation": [{ "text": "Docs" }],
+                    "tags": [{
+                        "name": "deprecated",
+                        "text": [{ "text": "use other" }]
+                    }]
+                }]
+            }
+        });
+
+        let value = adapt_signature_help(&payload, None).expect("signature help adapts");
+        let parsed: LspSignatureHelp =
+            serde_json::from_value(value).expect("signature help deserializes");
+        assert_eq!(parsed.signatures.len(), 1);
+        let sig = &parsed.signatures[0];
+        assert_eq!(sig.label, "function foo(bar: string)");
+        assert!(sig.documentation.is_some());
+        let params = sig.parameters.as_ref().expect("parameters present");
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].label, ParameterLabel::Simple("bar: string".into()));
+        assert_eq!(parsed.active_signature, Some(1));
+        assert_eq!(parsed.active_parameter, Some(0));
+    }
+}
+
 fn markdown_documentation(doc: String) -> Option<Documentation> {
     if doc.is_empty() {
         None

@@ -38,8 +38,7 @@ Neovim `lspconfig` setup.
 - [x] Inlay hints
 - [ ] Code lens
 - [ ] Custom commands / user APIs (organize imports, fix missing imports, etc.)
-- [ ] Test harness (port of busted/Plenary suite)
-- [ ] Dual-process (semantic diagnostics server) feature gating _(🚧 experimental)_
+- [ ] Dual-process (semantic diagnostics server) feature gating _(experimental)_
 
 ## Configuration
 
