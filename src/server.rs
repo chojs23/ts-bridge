@@ -12,9 +12,10 @@ use lsp_server::{
 };
 use lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionProviderCapability, CompletionOptions,
-    HoverProviderCapability, InitializeParams, InitializeResult, OneOf, PositionEncodingKind,
-    ProgressParams, ProgressParamsValue, ProgressToken, PublishDiagnosticsParams, RenameOptions,
-    ServerCapabilities, SignatureHelpOptions, TextDocumentSyncCapability, TextDocumentSyncKind,
+    HoverProviderCapability, InitializeParams, InitializeResult, InlayHintOptions,
+    InlayHintServerCapabilities, OneOf, PositionEncodingKind, ProgressParams, ProgressParamsValue,
+    ProgressToken, PublishDiagnosticsParams, RenameOptions, ServerCapabilities,
+    SignatureHelpOptions, TextDocumentSyncCapability, TextDocumentSyncKind,
     TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TypeDefinitionProviderCapability,
     WorkDoneProgress as LspWorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressCreateParams,
     WorkDoneProgressEnd, WorkDoneProgressReport,
@@ -22,19 +23,24 @@ use lsp_types::{
         DidChangeConfiguration, DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument,
         Notification as LspNotification, Progress, PublishDiagnostics,
     },
-    request::{Request as LspRequest, WorkDoneProgressCreate},
+    request::{
+        InlayHintRefreshRequest, InlayHintRequest, Request as LspRequest, WorkDoneProgressCreate,
+    },
 };
-use serde_json::{self, Value};
+use serde_json::{self, Value, json};
 
 use crate::config::{Config, PluginSettings};
+use crate::documents::{DocumentStore, TextSpan};
 use crate::process::ServerKind;
 use crate::protocol::diagnostics::{DiagnosticsEvent, DiagnosticsKind};
 use crate::protocol::text_document::completion::TRIGGER_CHARACTERS;
 use crate::protocol::text_document::signature_help::TRIGGER_CHARACTERS as SIG_HELP_TRIGGER_CHARACTERS;
 use crate::protocol::{self, ResponseAdapter};
 use crate::provider::Provider;
-use crate::rpc::{DispatchReceipt, Service};
+use crate::rpc::{DispatchReceipt, Priority, Route, Service};
 use crate::utils::uri_to_file_path;
+
+const DEFAULT_INLAY_HINT_SPAN: u32 = 5_000_000;
 
 /// Runs the LSP server over stdio. This is the entry-point Neovim (or any LSP
 /// client) will execute.
@@ -59,7 +65,7 @@ pub fn run_stdio_server() -> anyhow::Result<()> {
     let provider = Provider::new(workspace_root);
     let service = Service::new(config, provider);
 
-    let capabilities = advertised_capabilities();
+    let capabilities = advertised_capabilities(service.config().plugin());
     let init_result = InitializeResult {
         server_info: Some(lsp_types::ServerInfo {
             name: "ts-bridge".to_string(),
@@ -77,7 +83,7 @@ pub fn run_stdio_server() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn advertised_capabilities() -> ServerCapabilities {
+fn advertised_capabilities(settings: &PluginSettings) -> ServerCapabilities {
     let text_sync = TextDocumentSyncOptions {
         open_close: Some(true),
         change: Some(TextDocumentSyncKind::INCREMENTAL),
@@ -123,6 +129,14 @@ fn advertised_capabilities() -> ServerCapabilities {
                 work_done_progress_options: Default::default(),
             },
         );
+    let inlay_hint_provider = if settings.enable_inlay_hints {
+        Some(OneOf::Right(InlayHintServerCapabilities::Options(InlayHintOptions {
+            work_done_progress_options: Default::default(),
+            resolve_provider: None,
+        })))
+    } else {
+        None
+    };
     ServerCapabilities {
         position_encoding: Some(PositionEncodingKind::UTF16),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
@@ -137,6 +151,7 @@ fn advertised_capabilities() -> ServerCapabilities {
         rename_provider: Some(rename_provider),
         document_formatting_provider: Some(OneOf::Left(true)),
         semantic_tokens_provider: Some(semantic_tokens_provider),
+        inlay_hint_provider,
         text_document_sync: Some(TextDocumentSyncCapability::Options(text_sync)),
         ..Default::default()
     }
@@ -171,6 +186,9 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
     let mut pending = PendingRequests::default();
     let mut diag_state = DiagnosticsState::default();
     let mut progress = LoadingProgress::new();
+    let mut documents = DocumentStore::default();
+    let mut inlay_cache = InlayHintCache::default();
+    let mut inlay_preferences = InlayPreferenceState::default();
     let project_label = friendly_project_name(service.workspace_root());
     if let Err(err) = progress.begin(
         &connection,
@@ -188,13 +206,22 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
             &mut pending,
             &mut diag_state,
             &mut progress,
+            &mut inlay_cache,
             &project_label,
         )?;
 
         match connection.receiver.recv_timeout(poll_interval) {
             Ok(message) => match message {
                 Message::Request(req) => {
-                    if handle_request(&connection, &mut service, &mut pending, req)? {
+                    if handle_request(
+                        &connection,
+                        &mut service,
+                        &mut pending,
+                        &documents,
+                        &mut inlay_cache,
+                        &mut inlay_preferences,
+                        req,
+                    )? {
                         break;
                     }
                 }
@@ -208,6 +235,14 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
                     if notif.method == DidOpenTextDocument::METHOD {
                         let params: crate::types::DidOpenTextDocumentParams =
                             serde_json::from_value(notif.params)?;
+                        if let Ok(uri) = lsp_types::Uri::from_str(&params.text_document.uri) {
+                            documents.open(
+                                &uri,
+                                &params.text_document.text,
+                                Some(params.text_document.version),
+                            );
+                            inlay_cache.invalidate(&uri);
+                        }
                         let file_for_diagnostics =
                             uri_to_file_path(params.text_document.uri.as_str())
                                 .unwrap_or_else(|| params.text_document.uri.to_string());
@@ -237,6 +272,14 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
                     if notif.method == DidChangeTextDocument::METHOD {
                         let params: crate::types::DidChangeTextDocumentParams =
                             serde_json::from_value(notif.params)?;
+                        if let Ok(uri) = lsp_types::Uri::from_str(&params.text_document.uri) {
+                            documents.apply_changes(
+                                &uri,
+                                &params.content_changes,
+                                params.text_document.version,
+                            );
+                            inlay_cache.invalidate(&uri);
+                        }
                         let file_for_diagnostics =
                             uri_to_file_path(params.text_document.uri.as_str())
                                 .unwrap_or_else(|| params.text_document.uri.to_string());
@@ -267,6 +310,10 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
                         let params: crate::types::DidCloseTextDocumentParams =
                             serde_json::from_value(notif.params)?;
                         let uri = params.text_document.uri.clone();
+                        if let Ok(parsed) = lsp_types::Uri::from_str(&uri) {
+                            documents.close(&parsed);
+                            inlay_cache.invalidate(&parsed);
+                        }
                         let spec = crate::protocol::text_document::did_close::handle(
                             params,
                             service.workspace_root(),
@@ -287,6 +334,7 @@ fn main_loop(connection: Connection, mut service: Service) -> anyhow::Result<()>
                             .apply_workspace_settings(&params.settings);
                         if changed {
                             log::info!("workspace settings reloaded from didChangeConfiguration");
+                            inlay_preferences.invalidate();
                             // TODO: restart auxiliary tsserver processes when toggles require it.
                         }
                         continue;
@@ -318,6 +366,7 @@ fn drain_tsserver(
     pending: &mut PendingRequests,
     diag_state: &mut DiagnosticsState,
     progress: &mut LoadingProgress,
+    inlay_cache: &mut InlayHintCache,
     project_label: &str,
 ) -> anyhow::Result<()> {
     for event in service.poll_responses() {
@@ -358,7 +407,7 @@ fn drain_tsserver(
                 diag_state.reset_if_idle();
             }
             continue;
-        } else if let Some(response) = pending.resolve(event.server, &event.payload)? {
+        } else if let Some(response) = pending.resolve(event.server, &event.payload, inlay_cache)? {
             connection.sender.send(response.into())?;
         } else {
             log::trace!("tsserver {:?} -> {}", event.server, event.payload);
@@ -410,6 +459,9 @@ fn handle_request(
     connection: &Connection,
     service: &mut Service,
     pending: &mut PendingRequests,
+    documents: &DocumentStore,
+    inlay_cache: &mut InlayHintCache,
+    inlay_preferences: &mut InlayPreferenceState,
     req: Request,
 ) -> anyhow::Result<bool> {
     let lsp_server::Request { id, method, params } = req;
@@ -431,7 +483,51 @@ fn handle_request(
         return Ok(false);
     }
 
-    if let Some(spec) = protocol::route_request(&method, params) {
+    if method == InlayHintRefreshRequest::METHOD {
+        inlay_cache.clear();
+        let response = Response::new_ok(id, Value::Null);
+        connection.sender.send(response.into())?;
+        return Ok(false);
+    }
+
+    let params_value = params;
+    let mut spec = None;
+    let mut postprocess = None;
+
+    if method == InlayHintRequest::METHOD {
+        let enabled = service.config().plugin().enable_inlay_hints;
+        inlay_preferences.ensure(service)?;
+        if !enabled {
+            let response = Response::new_ok(id, Value::Array(Vec::new()));
+            connection.sender.send(response.into())?;
+            return Ok(false);
+        }
+        let hint_params: lsp_types::InlayHintParams =
+            serde_json::from_value(params_value.clone()).context("invalid inlay hint params")?;
+        if let Some(cached) = inlay_cache.lookup(&hint_params) {
+            let response = Response::new_ok(id, serde_json::to_value(cached)?);
+            connection.sender.send(response.into())?;
+            return Ok(false);
+        }
+        let span = documents
+            .span_for_range(&hint_params.text_document.uri, &hint_params.range)
+            .unwrap_or_else(|| {
+                log::warn!(
+                    "missing document snapshot for {}; requesting wide span",
+                    hint_params.text_document.uri.as_str()
+                );
+                TextSpan::covering_length(DEFAULT_INLAY_HINT_SPAN)
+            });
+        postprocess = Some(PostProcess::inlay_hint(&hint_params));
+        spec = Some(crate::protocol::text_document::inlay_hint::handle(
+            hint_params,
+            span,
+        ));
+    } else {
+        spec = protocol::route_request(&method, params_value);
+    }
+
+    if let Some(spec) = spec {
         match service.dispatch_request(spec.route, spec.payload, spec.priority) {
             Ok(receipts) => {
                 if let Some(adapter) = spec.on_response {
@@ -443,7 +539,13 @@ fn handle_request(
                         );
                         connection.sender.send(response.into())?;
                     } else {
-                        pending.track(&receipts, id, adapter, spec.response_context);
+                        pending.track(
+                            &receipts,
+                            id,
+                            adapter,
+                            spec.response_context,
+                            postprocess.clone(),
+                        );
                     }
                 } else {
                     let response = Response::new_err(
@@ -488,6 +590,7 @@ impl PendingRequests {
         id: RequestId,
         adapter: ResponseAdapter,
         context: Option<Value>,
+        postprocess: Option<PostProcess>,
     ) {
         for receipt in receipts {
             self.entries.insert(
@@ -499,12 +602,18 @@ impl PendingRequests {
                     id: id.clone(),
                     adapter,
                     context: context.clone(),
+                    postprocess: postprocess.clone(),
                 },
             );
         }
     }
 
-    fn resolve(&mut self, server: ServerKind, payload: &Value) -> anyhow::Result<Option<Response>> {
+    fn resolve(
+        &mut self,
+        server: ServerKind,
+        payload: &Value,
+        inlay_cache: &mut InlayHintCache,
+    ) -> anyhow::Result<Option<Response>> {
         if payload
             .get("type")
             .and_then(|kind| kind.as_str())
@@ -534,7 +643,12 @@ impl PendingRequests {
 
         if success {
             match (entry.adapter)(payload, entry.context.as_ref()) {
-                Ok(result) => Ok(Some(Response::new_ok(entry.id, result))),
+                Ok(result) => {
+                    if let Some(postprocess) = entry.postprocess {
+                        postprocess.apply(&result, inlay_cache)?;
+                    }
+                    Ok(Some(Response::new_ok(entry.id, result)))
+                }
                 Err(err) => Ok(Some(Response::new_err(
                     entry.id,
                     ErrorCode::InternalError as i32,
@@ -565,6 +679,124 @@ struct PendingEntry {
     id: RequestId,
     adapter: ResponseAdapter,
     context: Option<Value>,
+    postprocess: Option<PostProcess>,
+}
+
+#[derive(Clone)]
+enum PostProcess {
+    InlayHints { key: HintCacheKey },
+}
+
+impl PostProcess {
+    fn inlay_hint(params: &lsp_types::InlayHintParams) -> Self {
+        Self::InlayHints {
+            key: HintCacheKey::new(&params.text_document.uri, &params.range),
+        }
+    }
+
+    fn apply(self, value: &Value, cache: &mut InlayHintCache) -> anyhow::Result<()> {
+        match self {
+            PostProcess::InlayHints { key } => {
+                let hints: Vec<lsp_types::InlayHint> = serde_json::from_value(value.clone())
+                    .context("failed to decode inlay hint response payload")?;
+                cache.store(key, hints);
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct InlayHintCache {
+    entries: HashMap<HintCacheKey, Vec<lsp_types::InlayHint>>,
+}
+
+#[derive(Default)]
+struct InlayPreferenceState {
+    configured_for: Option<bool>,
+}
+
+impl InlayPreferenceState {
+    fn ensure(&mut self, service: &mut Service) -> anyhow::Result<()> {
+        let desired = service.config().plugin().enable_inlay_hints;
+        if self.configured_for == Some(desired) {
+            return Ok(());
+        }
+        self.dispatch(service, desired)?;
+        self.configured_for = Some(desired);
+        Ok(())
+    }
+
+    fn dispatch(&self, service: &mut Service, enabled: bool) -> anyhow::Result<()> {
+        let request = json!({
+            "command": "configure",
+            "arguments": {
+                "preferences": crate::protocol::text_document::inlay_hint::preferences(enabled),
+            }
+        });
+        let _ = service
+            .dispatch_request(Route::Both, request, Priority::Const)
+            .context("failed to dispatch tsserver configure request")?;
+        Ok(())
+    }
+
+    fn invalidate(&mut self) {
+        self.configured_for = None;
+    }
+}
+
+impl InlayHintCache {
+    fn lookup(&self, params: &lsp_types::InlayHintParams) -> Option<Vec<lsp_types::InlayHint>> {
+        let key = HintCacheKey::new(&params.text_document.uri, &params.range);
+        self.entries.get(&key).cloned()
+    }
+
+    fn store(&mut self, key: HintCacheKey, hints: Vec<lsp_types::InlayHint>) {
+        self.entries.insert(key, hints);
+    }
+
+    fn invalidate(&mut self, uri: &lsp_types::Uri) {
+        let needle = uri.to_string();
+        self.entries.retain(|key, _| key.uri != needle);
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+    }
+}
+
+#[derive(Hash, PartialEq, Eq, Clone)]
+struct HintCacheKey {
+    uri: String,
+    range: RangeFingerprint,
+}
+
+impl HintCacheKey {
+    fn new(uri: &lsp_types::Uri, range: &lsp_types::Range) -> Self {
+        Self {
+            uri: uri.to_string(),
+            range: RangeFingerprint::from_range(range),
+        }
+    }
+}
+
+#[derive(Hash, PartialEq, Eq, Clone)]
+struct RangeFingerprint {
+    start_line: u32,
+    start_character: u32,
+    end_line: u32,
+    end_character: u32,
+}
+
+impl RangeFingerprint {
+    fn from_range(range: &lsp_types::Range) -> Self {
+        Self {
+            start_line: range.start.line,
+            start_character: range.start.character,
+            end_line: range.end.line,
+            end_character: range.end.character,
+        }
+    }
 }
 
 #[derive(Default)]

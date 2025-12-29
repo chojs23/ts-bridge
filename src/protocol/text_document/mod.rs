@@ -17,6 +17,7 @@ pub mod document_symbol;
 pub mod formatting;
 pub mod hover;
 pub mod implementation;
+pub mod inlay_hint;
 pub mod references;
 pub mod rename;
 pub mod semantic_tokens;

@@ -21,6 +21,8 @@ pub struct PluginSettings {
     pub publish_diagnostic_on: DiagnosticPublishMode,
     /// Launch arguments and logging preferences forwarded to tsserver.
     pub tsserver: TsserverLaunchOptions,
+    /// Gate for tsserver-backed inlay hints; allows users to disable the feature entirely.
+    pub enable_inlay_hints: bool,
 }
 
 impl Default for PluginSettings {
@@ -29,6 +31,7 @@ impl Default for PluginSettings {
             separate_diagnostic_server: true,
             publish_diagnostic_on: DiagnosticPublishMode::InsertLeave,
             tsserver: TsserverLaunchOptions::default(),
+            enable_inlay_hints: true,
         }
     }
 }
@@ -122,6 +125,13 @@ impl PluginSettings {
 
         if let Some(tsserver) = map.get("tsserver") {
             changed |= self.tsserver.update_from_value(tsserver);
+        }
+
+        if let Some(value) = map.get("enable_inlay_hints").and_then(|v| v.as_bool()) {
+            if self.enable_inlay_hints != value {
+                self.enable_inlay_hints = value;
+                changed = true;
+            }
         }
 
         changed

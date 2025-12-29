@@ -1,5 +1,6 @@
 pub mod api;
 pub mod config;
+pub mod documents;
 pub mod process;
 pub mod protocol;
 pub mod provider;

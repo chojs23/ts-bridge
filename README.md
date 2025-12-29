@@ -35,7 +35,7 @@ Neovim `lspconfig` setup.
 - [x] `textDocument/implementation`
 - [x] `workspace/symbol` / `textDocument/documentSymbol`
 - [x] Semantic tokens
-- [ ] Inlay hints
+- [x] Inlay hints
 - [ ] Code lens
 - [ ] Custom commands / user APIs (organize imports, fix missing imports, etc.)
 - [ ] Test harness (port of busted/Plenary suite)
@@ -56,6 +56,7 @@ lspconfig.ts_bridge.setup({
     ["ts-bridge"] = {
       separate_diagnostic_server = true,      -- launch syntax + semantic tsserver
       publish_diagnostic_on = "insert_leave",
+      enable_inlay_hints = true,
       tsserver = {
         locale = nil,
         log_directory = nil,
