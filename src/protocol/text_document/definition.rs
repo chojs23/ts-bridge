@@ -102,3 +102,141 @@ fn adapt_definition(payload: &Value, _context: Option<&Value>) -> Result<Value> 
     let response = GotoDefinitionResponse::Link(links);
     Ok(serde_json::to_value(response)?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lsp_types::{
+        GotoDefinitionParams, GotoDefinitionResponse, LocationLink, Position,
+        TextDocumentIdentifier, TextDocumentPositionParams, Uri,
+    };
+    use std::str::FromStr;
+
+    fn params_with_context(source_definition: bool) -> DefinitionParams {
+        let base = GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Uri::from_str("file:///workspace/app.ts").unwrap(),
+                },
+                position: Position {
+                    line: 2,
+                    character: 10,
+                },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+        DefinitionParams {
+            base,
+            context: Some(DefinitionContext {
+                source_definition: Some(source_definition),
+            }),
+        }
+    }
+
+    #[test]
+    fn handle_builds_definition_request() {
+        let params = DefinitionParams {
+            base: GotoDefinitionParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: Uri::from_str("file:///workspace/app.ts").unwrap(),
+                    },
+                    position: Position {
+                        line: 1,
+                        character: 4,
+                    },
+                },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            },
+            context: None,
+        };
+        let spec = handle(params);
+        assert_eq!(spec.route, Route::Syntax);
+        assert_eq!(spec.priority, Priority::Normal);
+        assert_eq!(spec.payload.get("command"), Some(&json!(CMD_DEFINITION)));
+        let args = spec.payload.get("arguments").expect("missing args");
+        assert_eq!(
+            args.get("file").and_then(|v| v.as_str()),
+            Some("/workspace/app.ts")
+        );
+        assert_eq!(args.get("line").and_then(|v| v.as_u64()), Some(2));
+        assert_eq!(args.get("offset").and_then(|v| v.as_u64()), Some(5));
+    }
+
+    #[test]
+    fn handle_uses_source_definition_command_when_context_requests_it() {
+        let spec = handle(params_with_context(true));
+        assert_eq!(spec.payload.get("command"), Some(&json!(CMD_SOURCE_DEFINITION)));
+    }
+
+    #[test]
+    fn adapt_definition_converts_standard_payload() {
+        let payload = json!({
+            "command": CMD_DEFINITION,
+            "body": {
+                "textSpan": {
+                    "start": { "line": 3, "offset": 1 },
+                    "end": { "line": 3, "offset": 6 }
+                },
+                "definitions": [{
+                    "file": "/workspace/foo.ts",
+                    "start": { "line": 10, "offset": 2 },
+                    "end": { "line": 10, "offset": 12 },
+                    "contextStart": { "line": 9, "offset": 1 },
+                    "contextEnd": { "line": 11, "offset": 1 }
+                }]
+            }
+        });
+
+        let value = adapt_definition(&payload, None).expect("definition should adapt");
+        match serde_json::from_value::<GotoDefinitionResponse>(value)
+            .expect("response should deserialize")
+        {
+            GotoDefinitionResponse::Link(links) => {
+                assert_eq!(links.len(), 1);
+                let LocationLink {
+                    target_uri,
+                    target_selection_range,
+                    target_range,
+                    origin_selection_range,
+                } = &links[0];
+                assert_eq!(target_uri.to_string(), "file:///workspace/foo.ts");
+                assert_eq!(target_selection_range.start.line, 9);
+                assert_eq!(target_selection_range.start.character, 1);
+                assert_eq!(target_range.start.line, 8);
+                assert_eq!(origin_selection_range.as_ref().map(|r| r.start.line), Some(2));
+            }
+            _ => panic!("expected link response"),
+        }
+    }
+
+    #[test]
+    fn adapt_definition_handles_source_definition_shape() {
+        let payload = json!({
+            "command": CMD_SOURCE_DEFINITION,
+            "body": [{
+                "file": "/workspace/src.ts",
+                "start": { "line": 5, "offset": 3 },
+                "end": { "line": 5, "offset": 7 }
+            }]
+        });
+        let value = adapt_definition(&payload, None).expect("source definition adapts");
+        match serde_json::from_value::<GotoDefinitionResponse>(value)
+            .expect("response should deserialize")
+        {
+            GotoDefinitionResponse::Link(links) => {
+                assert_eq!(links.len(), 1);
+                let LocationLink {
+                    target_uri,
+                    origin_selection_range,
+                    ..
+                } = &links[0];
+                assert_eq!(target_uri.to_string(), "file:///workspace/src.ts");
+                assert!(origin_selection_range.is_none());
+            }
+            _ => panic!("expected link response"),
+        }
+    }
+}
