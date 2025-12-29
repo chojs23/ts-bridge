@@ -6,7 +6,8 @@
 //! inside a file and translates it into LSP `DocumentSymbol` entries.
 
 use anyhow::{Context, Result};
-use lsp_types::{DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse, SymbolKind};
+use lsp_types::{DocumentSymbolParams, Range, SymbolKind, SymbolTag};
+use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::protocol::RequestSpec;
@@ -53,11 +54,11 @@ fn adapt_document_symbols(payload: &Value, _context: Option<&Value>) -> Result<V
         }
     }
 
-    let response = DocumentSymbolResponse::Nested(symbols);
-    Ok(serde_json::to_value(response)?)
+    let serialized = symbols.into_iter().map(|symbol| json!(symbol)).collect();
+    Ok(Value::Array(serialized))
 }
 
-fn build_symbol(node: &Value) -> Option<DocumentSymbol> {
+fn build_symbol(node: &Value) -> Option<BridgeDocumentSymbol> {
     let name = node.get("text")?.as_str()?.to_string();
     let kind = node
         .get("kind")
@@ -65,11 +66,15 @@ fn build_symbol(node: &Value) -> Option<DocumentSymbol> {
         .map(symbol_kind_from_ts)
         .unwrap_or(SymbolKind::VARIABLE);
     let range = symbol_range(node)?;
-    let detail = node
+    let modifiers = node
         .get("kindModifiers")
         .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string());
+        .unwrap_or("");
+    let detail = if modifiers.is_empty() {
+        None
+    } else {
+        Some(modifiers.to_string())
+    };
 
     let child_items = node
         .get("childItems")
@@ -81,7 +86,7 @@ fn build_symbol(node: &Value) -> Option<DocumentSymbol> {
         .filter_map(|child| build_symbol(&child))
         .collect::<Vec<_>>();
 
-    Some(DocumentSymbol {
+    Some(BridgeDocumentSymbol {
         name,
         detail,
         kind,
@@ -92,9 +97,19 @@ fn build_symbol(node: &Value) -> Option<DocumentSymbol> {
         } else {
             Some(children)
         },
-        tags: None,
-        deprecated: None,
+        tags: document_symbol_tags(modifiers),
     })
+}
+
+fn document_symbol_tags(modifiers: &str) -> Option<Vec<SymbolTag>> {
+    let contains_deprecated = modifiers
+        .split(|c: char| matches!(c, ',' | ' ' | ';' | '\t'))
+        .any(|token| token.eq_ignore_ascii_case("deprecated"));
+    if contains_deprecated {
+        Some(vec![SymbolTag::DEPRECATED])
+    } else {
+        None
+    }
 }
 
 fn symbol_range(node: &Value) -> Option<lsp_types::Range> {
@@ -125,4 +140,19 @@ fn symbol_kind_from_ts(kind: &str) -> SymbolKind {
         "type" => SymbolKind::TYPE_PARAMETER,
         _ => SymbolKind::VARIABLE,
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BridgeDocumentSymbol {
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
+    kind: SymbolKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tags: Option<Vec<SymbolTag>>,
+    range: Range,
+    selection_range: Range,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    children: Option<Vec<BridgeDocumentSymbol>>,
 }

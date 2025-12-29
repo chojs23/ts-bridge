@@ -1,5 +1,6 @@
 use anyhow::Result;
-use lsp_types::{SymbolInformation, WorkspaceSymbolParams};
+use lsp_types::{Location, SymbolKind, SymbolTag, WorkspaceSymbolParams};
+use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::protocol::RequestSpec;
@@ -36,48 +37,74 @@ fn adapt_workspace_symbols(payload: &Value, _context: Option<&Value>) -> Result<
     let mut symbols = Vec::new();
     for item in items {
         if let Some(symbol) = convert_navto_item(&item) {
-            symbols.push(symbol);
+            symbols.push(json!(symbol));
         }
     }
 
-    Ok(serde_json::to_value(symbols)?)
+    Ok(Value::Array(symbols))
 }
 
-fn convert_navto_item(item: &Value) -> Option<SymbolInformation> {
+fn convert_navto_item(item: &Value) -> Option<WorkspaceSymbol> {
     let name = item.get("name")?.as_str()?.to_string();
     let kind = item
         .get("kind")
         .and_then(|k| k.as_str())
         .map(document_symbol_kind)
-        .unwrap_or(lsp_types::SymbolKind::VARIABLE);
+        .unwrap_or(SymbolKind::VARIABLE);
     let location = item.get("textSpan").and_then(tsserver_span_to_location)?;
+    let modifiers = item
+        .get("kindModifiers")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let container_name = item
         .get("containerName")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    Some(SymbolInformation {
+    Some(WorkspaceSymbol {
         name,
         kind,
         location,
         container_name,
-        tags: None,
-        deprecated: None,
+        tags: workspace_symbol_tags(modifiers),
     })
 }
 
-fn document_symbol_kind(kind: &str) -> lsp_types::SymbolKind {
-    match kind {
-        "class" => lsp_types::SymbolKind::CLASS,
-        "interface" => lsp_types::SymbolKind::INTERFACE,
-        "enum" => lsp_types::SymbolKind::ENUM,
-        "method" => lsp_types::SymbolKind::METHOD,
-        "function" => lsp_types::SymbolKind::FUNCTION,
-        "member" | "property" | "getter" | "setter" => lsp_types::SymbolKind::PROPERTY,
-        "var" | "let" | "const" => lsp_types::SymbolKind::VARIABLE,
-        "module" => lsp_types::SymbolKind::MODULE,
-        "namespace" => lsp_types::SymbolKind::NAMESPACE,
-        "type" => lsp_types::SymbolKind::TYPE_PARAMETER,
-        _ => lsp_types::SymbolKind::VARIABLE,
+fn workspace_symbol_tags(modifiers: &str) -> Option<Vec<SymbolTag>> {
+    let contains_deprecated = modifiers
+        .split(|c: char| matches!(c, ',' | ' ' | ';' | '\t'))
+        .any(|token| token.eq_ignore_ascii_case("deprecated"));
+    if contains_deprecated {
+        Some(vec![SymbolTag::DEPRECATED])
+    } else {
+        None
     }
+}
+
+fn document_symbol_kind(kind: &str) -> SymbolKind {
+    match kind {
+        "class" => SymbolKind::CLASS,
+        "interface" => SymbolKind::INTERFACE,
+        "enum" => SymbolKind::ENUM,
+        "method" => SymbolKind::METHOD,
+        "function" => SymbolKind::FUNCTION,
+        "member" | "property" | "getter" | "setter" => SymbolKind::PROPERTY,
+        "var" | "let" | "const" => SymbolKind::VARIABLE,
+        "module" => SymbolKind::MODULE,
+        "namespace" => SymbolKind::NAMESPACE,
+        "type" => SymbolKind::TYPE_PARAMETER,
+        _ => SymbolKind::VARIABLE,
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceSymbol {
+    name: String,
+    kind: SymbolKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tags: Option<Vec<SymbolTag>>,
+    location: Location,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    container_name: Option<String>,
 }

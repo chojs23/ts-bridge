@@ -2,6 +2,18 @@
 name = "ts-bridge"
 version = "0.1.0"
 edition = "2024"
+description = "A Rust TypeScript language-server shim that bridges Neovim's LSP client with tsserver."
+authors = ["Neo <chojs990222@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/chojs23/ts-bridge"
+homepage = "https://github.com/chojs23/ts-bridge"
+documentation = "https://github.com/chojs23/ts-bridge"
+readme = "README.md"
+keywords = ["typescript", "language-server", "lsp", "bridge", "development"]
+categories = [
+  "development-tools::language-servers",
+  "programming-languages::typescript",
+]
 
 [dependencies]
 anyhow = "1.0.100"
@@ -16,3 +28,25 @@ tempfile = "3.23.0"
 thiserror = "2.0.17"
 url = "2.5.7"
 which = "8.0.0"
+
+[profile.dev]
+opt-level = 0
+debug = true
+debug-assertions = true
+overflow-checks = true
+lto = false
+panic = "unwind"
+incremental = true
+codegen-units = 256
+rpath = false
+
+[profile.release]
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+# lto = "thin"
+panic = "unwind"
+incremental = false
+codegen-units = 1
+rpath = false
