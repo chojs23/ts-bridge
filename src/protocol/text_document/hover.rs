@@ -130,3 +130,74 @@ fn render_tags(tags_value: &Value) -> Option<String> {
         Some(lines.join("\n"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lsp_types::{
+        HoverParams, Hover as LspHover, Position, TextDocumentIdentifier, TextDocumentPositionParams,
+        Uri,
+    };
+    use std::str::FromStr;
+
+    #[test]
+    fn handle_builds_quickinfo_request() {
+        let params = HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Uri::from_str("file:///workspace/foo.ts").unwrap(),
+                },
+                position: Position {
+                    line: 4,
+                    character: 2,
+                },
+            },
+            work_done_progress_params: Default::default(),
+        };
+
+        let spec = handle(params);
+        assert_eq!(spec.route, Route::Syntax);
+        assert_eq!(spec.priority, Priority::Normal);
+        let args = spec
+            .payload
+            .get("arguments")
+            .expect("arguments missing");
+        assert_eq!(
+            args.get("file").and_then(|v| v.as_str()),
+            Some("/workspace/foo.ts")
+        );
+        assert_eq!(args.get("line").and_then(|v| v.as_u64()), Some(5));
+        assert_eq!(args.get("offset").and_then(|v| v.as_u64()), Some(3));
+    }
+
+    #[test]
+    fn adapt_quickinfo_formats_markdown() {
+        let payload = json!({
+            "body": {
+                "displayString": "const greet: () => void",
+                "documentation": [{ "text": "Greets the user." }],
+                "tags": [{
+                    "name": "deprecated",
+                    "text": [{ "text": "Use greetAsync instead." }]
+                }],
+                "start": { "line": 1, "offset": 1 },
+                "end": { "line": 1, "offset": 6 }
+            }
+        });
+
+        let hover_value = adapt_quickinfo(&payload, None).expect("hover should adapt");
+        let hover: LspHover = serde_json::from_value(hover_value).expect("hover deserializes");
+        let HoverContents::Markup(content) = hover.contents else {
+            panic!("expected markup hover");
+        };
+        assert_eq!(
+            content.value,
+            "```typescript\nconst greet: () => void\n```\n\nGreets the user.\n\n_@deprecated_ — Use greetAsync instead."
+        );
+        let range = hover.range.expect("hover should include range");
+        assert_eq!(range.start.line, 0);
+        assert_eq!(range.start.character, 0);
+        assert_eq!(range.end.line, 0);
+        assert_eq!(range.end.character, 5);
+    }
+}
