@@ -38,6 +38,10 @@ cargo build --release
 The resulting binary (`target/release/ts-bridge`) can be pointed to from your
 Neovim `lspconfig` setup.
 
+## Downloading prebuilt binaries
+
+Get the latest release artifact from the [GitHub Releases](https://github.com/chojs23/ts-bridge/releases) page.
+
 ## LSP Feature Progress
 
 - [x] `initialize`/`initialized` handshake & server capabilities
@@ -97,3 +101,8 @@ Because `ts-bridge` delays spawning `tsserver` until the first routed request,
 these defaults (or any overrides you make) apply to both syntax and semantic
 processes before they boot. Restart your LSP client after changing the snippet
 so a fresh tsserver picks up the new arguments.
+
+## Contributing
+
+Every contributions are welcome! Feel free to open issues or submit pull
+requests.
