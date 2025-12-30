@@ -31,6 +31,7 @@ pub struct DefinitionParams {
 }
 
 #[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct DefinitionContext {
     pub source_definition: Option<bool>,
 }
@@ -168,6 +169,22 @@ mod tests {
     #[test]
     fn handle_uses_source_definition_command_when_context_requests_it() {
         let spec = handle(params_with_context(true));
+        assert_eq!(
+            spec.payload.get("command"),
+            Some(&json!(CMD_SOURCE_DEFINITION))
+        );
+    }
+
+    #[test]
+    fn source_definition_flag_deserializes_from_camel_case_context() {
+        let raw = json!({
+            "textDocument": { "uri": "file:///workspace/app.ts" },
+            "position": { "line": 4, "character": 2 },
+            "context": { "sourceDefinition": true }
+        });
+        let params: DefinitionParams =
+            serde_json::from_value(raw).expect("definition params should deserialize");
+        let spec = handle(params);
         assert_eq!(
             spec.payload.get("command"),
             Some(&json!(CMD_SOURCE_DEFINITION))
