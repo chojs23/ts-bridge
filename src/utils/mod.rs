@@ -45,15 +45,47 @@ pub struct TsserverRange {
 
 pub fn uri_to_file_path(uri: &str) -> Option<String> {
     let parsed = Url::parse(uri).ok()?;
-    parsed
-        .to_file_path()
-        .ok()
-        .map(|p| p.to_string_lossy().into_owned())
+    if let Ok(path) = parsed.to_file_path() {
+        return Some(path.to_string_lossy().into_owned());
+    }
+
+    if parsed.scheme() != "file" {
+        return None;
+    }
+
+    let mut path = parsed.path().to_string();
+    if path.is_empty() {
+        return None;
+    }
+
+    // When URLs omit a Windows drive letter (common in tests or WSL),
+    // `to_file_path` rejects the value. Fall back to the raw path so the
+    // tsserver payloads still receive stable `/workspace/foo.ts` strings.
+    if cfg!(windows) {
+        // Preserve leading "/" so expectations stay platform-independent.
+        path = path.replace('\\', "/");
+    }
+
+    Some(path)
 }
 
 pub fn file_path_to_uri(path: &str) -> Option<Uri> {
-    let url = Url::from_file_path(path).ok()?;
-    Uri::from_str(url.as_str()).ok()
+    if path.starts_with("file://") {
+        return Uri::from_str(path).ok();
+    }
+
+    if let Ok(url) = Url::from_file_path(path) {
+        return Uri::from_str(url.as_str()).ok();
+    }
+
+    if Path::new(path).is_absolute() || path.starts_with('/') {
+        // Normalise to forward slashes so file URLs remain valid across OSes.
+        let sanitized = path.replace('\\', "/");
+        let formatted = format!("file://{sanitized}");
+        return Uri::from_str(&formatted).ok();
+    }
+
+    None
 }
 
 pub fn lsp_text_doc_to_tsserver_entry(
