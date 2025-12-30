@@ -6,6 +6,16 @@ requests into the TypeScript server protocol (and vice‑versa) while offering a
 clear, modular architecture (`config`, `provider`, `process`, `protocol`, etc.)
 that mirrors how modern JS/TS tooling pipelines are organized.
 
+## Prerequisites
+
+- Rust toolchain 1.80+ (Rust 2024 edition) to build the binary via Cargo.
+- Node.js 18+ with a matching TypeScript/`tsserver` installation discoverable
+  via your workspace (local `node_modules` preferred, but global/npm/Nix paths
+  are fine too).
+- Neovim 0.11+ so the built-in LSP client matches the capabilities advertised
+  by `ts-bridge` (semantic tokens, inlay hints, etc.).
+
+
 ## Building
 
 ```bash
