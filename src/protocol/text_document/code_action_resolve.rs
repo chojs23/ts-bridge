@@ -86,7 +86,7 @@ fn adapt_fix_all_response(payload: &Value, context: Option<&Value>) -> Result<Va
     }
 
     if action.kind.is_none() {
-        action.kind = Some(CodeActionKind::QUICKFIX);
+        action.kind = Some(CodeActionKind::SOURCE_FIX_ALL);
     }
 
     Ok(serde_json::to_value(action)?)

@@ -185,9 +185,12 @@ fn build_fix_all_action(fix: &Value, ctx: &AdapterContext) -> Option<CodeAction>
     let description = fix.get("fixAllDescription")?.as_str()?;
     let diagnostics = diagnostics_for_action(&ctx.context);
 
+    // "Fix all" belongs to the source action family so clients can filter by
+    // `source.fixAll` in picker UIs. Classifying it as a quick fix hides the
+    // entry whenever a client explicitly requests source actions only.
     let mut action = CodeAction {
         title: description.to_string(),
-        kind: Some(CodeActionKind::QUICKFIX),
+        kind: Some(CodeActionKind::SOURCE_FIX_ALL),
         diagnostics,
         ..CodeAction::default()
     };
@@ -297,4 +300,173 @@ pub(crate) fn organize_imports_payload(file: &str) -> Value {
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lsp_types::{
+        CodeActionContext, CodeActionKind, Diagnostic, Position, Range, TextDocumentIdentifier, Uri,
+    };
+    use serde_json::json;
+    use std::str::FromStr;
+
+    const FILE_URI: &str = "file:///workspace/app.ts";
+    const FILE_PATH: &str = "/workspace/app.ts";
+
+    fn sample_diagnostic(code: i32) -> Diagnostic {
+        Diagnostic {
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 1,
+                },
+            },
+            code: Some(NumberOrString::Number(code)),
+            ..Diagnostic::default()
+        }
+    }
+
+    fn sample_context() -> CodeActionContext {
+        CodeActionContext {
+            diagnostics: vec![sample_diagnostic(6133)],
+            only: None,
+            trigger_kind: None,
+        }
+    }
+
+    fn adapter_context(include_organize: bool) -> Value {
+        json!({
+            "file": FILE_PATH,
+            "context": sample_context(),
+            "includeOrganize": include_organize,
+        })
+    }
+
+    #[test]
+    fn build_fix_all_action_sets_source_kind() {
+        let ctx = AdapterContext {
+            file: FILE_PATH.to_string(),
+            context: sample_context(),
+            include_organize: false,
+        };
+        let fix = json!({
+            "fixId": "fixAllMissingImports",
+            "fixAllDescription": "Fix all missing imports",
+        });
+
+        let action = build_fix_all_action(&fix, &ctx).expect("fix all action");
+        assert_eq!(action.kind, Some(CodeActionKind::SOURCE_FIX_ALL));
+        let data: CodeActionData =
+            serde_json::from_value(action.data.expect("data")).expect("code action data");
+        match data {
+            CodeActionData::FixAll(fix_all) => {
+                assert_eq!(fix_all.file, FILE_PATH);
+                assert_eq!(fix_all.fix_id, "fixAllMissingImports");
+            }
+            _ => panic!("expected fix all data"),
+        }
+    }
+
+    #[test]
+    fn adapt_code_actions_emits_quick_fix_fix_all_and_organize() {
+        let payload = json!({
+            "body": [{
+                "description": "Add missing import",
+                "changes": [{
+                    "fileName": FILE_PATH,
+                    "textChanges": [{
+                        "start": { "line": 1, "offset": 1 },
+                        "end": { "line": 1, "offset": 1 },
+                        "newText": "import { foo } from 'foo';\n"
+                    }]
+                }],
+                "fixId": "fixAllMissingImports",
+                "fixAllDescription": "Fix all missing imports",
+                "isPreferred": true,
+            }]
+        });
+        let ctx_value = adapter_context(true);
+
+        let adapted = adapt_code_actions(&payload, Some(&ctx_value)).expect("adapt");
+        let actions: Vec<_> = match serde_json::from_value::<CodeActionResponse>(adapted) {
+            Ok(actions) => actions,
+            Err(err) => panic!("failed to deserialize code action response: {err}"),
+        };
+        assert_eq!(actions.len(), 3, "quick fix, fix all, organize placeholder");
+
+        match &actions[0] {
+            CodeActionOrCommand::CodeAction(action) => {
+                assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+                assert!(action.edit.is_some(), "quick fix should have edit");
+                assert_eq!(action.is_preferred, Some(true));
+            }
+            _ => panic!("expected code action"),
+        }
+
+        match &actions[1] {
+            CodeActionOrCommand::CodeAction(action) => {
+                assert_eq!(action.kind, Some(CodeActionKind::SOURCE_FIX_ALL));
+                let data: CodeActionData =
+                    serde_json::from_value(action.data.clone().unwrap()).expect("fix all data");
+                match data {
+                    CodeActionData::FixAll(fix_all) => {
+                        assert_eq!(fix_all.file, FILE_PATH);
+                    }
+                    _ => panic!("expected fix all data"),
+                }
+            }
+            _ => panic!("expected fix all code action"),
+        }
+
+        match &actions[2] {
+            CodeActionOrCommand::CodeAction(action) => {
+                assert_eq!(action.kind, Some(CodeActionKind::SOURCE_ORGANIZE_IMPORTS));
+                assert!(action.data.is_some());
+            }
+            _ => panic!("expected organize imports action"),
+        }
+    }
+
+    #[test]
+    fn handle_collects_error_codes_from_context() {
+        let params = CodeActionParams {
+            text_document: TextDocumentIdentifier {
+                uri: Uri::from_str(FILE_URI).expect("uri"),
+            },
+            range: lsp_types::Range {
+                start: lsp_types::Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: lsp_types::Position {
+                    line: 0,
+                    character: 1,
+                },
+            },
+            context: CodeActionContext {
+                diagnostics: vec![sample_diagnostic(1234)],
+                only: None,
+                trigger_kind: None,
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+
+        let spec = handle(params);
+        let args = spec
+            .payload
+            .get("arguments")
+            .and_then(|value| value.as_object())
+            .expect("arguments");
+        let error_codes = args
+            .get("errorCodes")
+            .and_then(|v| v.as_array())
+            .expect("error codes array");
+        assert_eq!(error_codes, &[json!(1234)]);
+    }
 }
