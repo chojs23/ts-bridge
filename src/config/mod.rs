@@ -53,9 +53,7 @@ impl DiagnosticPublishMode {
     }
 }
 
-/// Global configuration facade that exposes read-only handles to each concrete
-/// settings struct.  Eventually this will also provide runtime reloading when
-/// Neovim pushes `workspace/didChangeConfiguration`.
+/// Global configuration facade that exposes read-only handles to each settings struct.
 #[derive(Debug, Default)]
 pub struct Config {
     plugin: PluginSettings,
