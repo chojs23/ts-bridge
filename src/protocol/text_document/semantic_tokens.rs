@@ -207,11 +207,20 @@ mod tests {
         let spec = handle_full(params);
         assert_eq!(spec.route, Route::Syntax);
         assert_eq!(spec.priority, Priority::Low);
-        assert_eq!(spec.payload.get("command"), Some(&json!("encodedSemanticClassifications-full")));
+        assert_eq!(
+            spec.payload.get("command"),
+            Some(&json!("encodedSemanticClassifications-full"))
+        );
         let args = spec.payload.get("arguments").expect("arguments missing");
-        assert_eq!(args.get("file").and_then(|v| v.as_str()), Some("/workspace/src/lib.ts"));
+        assert_eq!(
+            args.get("file").and_then(|v| v.as_str()),
+            Some("/workspace/src/lib.ts")
+        );
         assert_eq!(args.get("format").and_then(|v| v.as_str()), Some("2020"));
-        assert!(args.get("length").is_none(), "full requests should not set range length");
+        assert!(
+            args.get("length").is_none(),
+            "full requests should not set range length"
+        );
     }
 
     #[test]
@@ -219,8 +228,14 @@ mod tests {
         let params = lsp_types::SemanticTokensRangeParams {
             text_document: TextDocumentIdentifier { uri: uri() },
             range: Range {
-                start: Position { line: 5, character: 2 },
-                end: Position { line: 7, character: 0 },
+                start: Position {
+                    line: 5,
+                    character: 2,
+                },
+                end: Position {
+                    line: 7,
+                    character: 0,
+                },
             },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
@@ -228,8 +243,18 @@ mod tests {
         let spec = handle_range(params);
         assert_eq!(spec.route, Route::Syntax);
         let args = spec.payload.get("arguments").expect("arguments missing");
-        assert_eq!(args.get("start").and_then(|s| s.get("line")).and_then(|v| v.as_u64()), Some(6));
-        assert_eq!(args.get("start").and_then(|s| s.get("offset")).and_then(|v| v.as_u64()), Some(3));
+        assert_eq!(
+            args.get("start")
+                .and_then(|s| s.get("line"))
+                .and_then(|v| v.as_u64()),
+            Some(6)
+        );
+        assert_eq!(
+            args.get("start")
+                .and_then(|s| s.get("offset"))
+                .and_then(|v| v.as_u64()),
+            Some(3)
+        );
         assert!(args.get("length").and_then(|v| v.as_u64()).is_some());
     }
 
@@ -256,7 +281,8 @@ mod tests {
         });
 
         let value = adapt_semantic_tokens(&payload, None).expect("semantic tokens adapt");
-        let tokens: SemanticTokens = serde_json::from_value(value).expect("semantic tokens deserialize");
+        let tokens: SemanticTokens =
+            serde_json::from_value(value).expect("semantic tokens deserialize");
         assert_eq!(tokens.data.len(), 2);
         // Tokens should be sorted and use relative encoding
         assert_eq!(tokens.data[0].delta_line, 0);

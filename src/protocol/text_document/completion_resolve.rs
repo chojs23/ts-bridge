@@ -20,6 +20,7 @@ use crate::rpc::{Priority, Route};
 use crate::utils::tsserver_range_from_value_lsp;
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct CompletionResolveData {
     file: String,
     position: Position,
