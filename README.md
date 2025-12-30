@@ -74,6 +74,19 @@ snippet that wires the server up with all default options spelled out so you can
 override only what you need later:
 
 ```lua
+local configs = require("lspconfig.configs")
+local util = require("lspconfig.util")
+
+if not configs.ts_bridge then
+  configs.ts_bridge = {
+    default_config = {
+      cmd = { "/path/to/ts-bridge" },
+      filetypes = { "typescript", "typescriptreact", "javascript", "javascriptreact" },
+      root_dir = util.root_pattern("tsconfig.json", "jsconfig.json", "package.json", ".git"),
+    },
+  }
+end
+
 local lspconfig = require("lspconfig")
 
 lspconfig.ts_bridge.setup({
