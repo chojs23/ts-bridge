@@ -57,11 +57,13 @@ pub fn run_stdio_server() -> anyhow::Result<()> {
     let workspace_root =
         workspace_root_from_params(&params).unwrap_or_else(|| std::env::current_dir().unwrap());
     let mut config = Config::new(PluginSettings::default());
-    if let Some(options) = params.initialization_options.as_ref() {
-        if config.apply_workspace_settings(options) {
-            log::info!("applied initializationOptions to ts-bridge settings");
-        }
+
+    if let Some(options) = params.initialization_options.as_ref()
+        && config.apply_workspace_settings(options)
+    {
+        log::info!("applied initializationOptions to ts-bridge settings");
     }
+
     let provider = Provider::new(workspace_root);
     let service = Service::new(config, provider);
 
@@ -184,8 +186,10 @@ mod tests {
 
     #[test]
     fn advertised_capabilities_disable_inlay_hints_when_setting_is_false() {
-        let mut settings = PluginSettings::default();
-        settings.enable_inlay_hints = false;
+        let settings = PluginSettings {
+            enable_inlay_hints: false,
+            ..Default::default()
+        };
 
         let caps = advertised_capabilities(&settings);
         assert!(
@@ -529,7 +533,7 @@ fn handle_request(
     }
 
     let params_value = params;
-    let mut spec = None;
+    let spec: Option<protocol::RequestSpec>;
     let mut postprocess = None;
 
     if method == InlayHintRequest::METHOD {
@@ -848,10 +852,7 @@ struct DiagnosticsState {
 
 impl DiagnosticsState {
     fn register_pending(&mut self, server: ServerKind, seq: u64) {
-        self.order
-            .entry(server)
-            .or_insert_with(VecDeque::new)
-            .push_back(seq);
+        self.order.entry(server).or_default().push_back(seq);
         let entry = PendingDiagnosticsEntry::new(server);
         self.workload.add_expected(entry.progress.expected_count());
         self.pending.insert((server, seq), entry);
