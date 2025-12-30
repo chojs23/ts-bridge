@@ -2,18 +2,30 @@
 
 [![](https://github.com/user-attachments/assets/7ea6bfbb-4031-44c2-9113-7248c0f1addf)](https://github.com/user-attachments/assets/7ea6bfbb-4031-44c2-9113-7248c0f1addf)
 
-`ts-bridge` is a standalone TypeScript language-server shim written in Rust. It
-sits between Neovim's built-in LSP client and `tsserver`, translating LSP
-requests into the TypeScript server protocol (and vice‑versa) while offering a
-clear, modular architecture (`config`, `provider`, `process`, `protocol`, etc.)
-that mirrors how modern JS/TS tooling pipelines are organized.
+`ts-bridge` is a standalone TypeScript language-server shim written in Rust. In
+this context _standalone_ means the Neovim-facing bits ship as a single Rust
+binary—_not_ that TypeScript itself has been rewritten. The binary still launches
+the official `tsserver` that ships with TypeScript and simply orchestrates the
+LSP ↔ TypeScript Server conversations.
+
+`ts-bridge` sits between Neovim's built-in LSP client and `tsserver`, translating
+LSP requests into the TypeScript server protocol (and vice‑versa) while offering
+a clear, modular architecture (`config`, `provider`, `process`, `protocol`,
+etc.) that mirrors how modern JS/TS tooling pipelines are organized.
+
+> **What “standalone” does _not_ mean:** This project does not replace `tsc` or
+> `tsserver`. You still need a standard TypeScript installation, and all
+> type-checking/completions semantics come from Microsoft's compiler. What you
+> gain is a single Rust binary that handles the Neovim side (startup,
+> diagnostics/logging, worker orchestration) without additional Lua or Node glue.
 
 ## Prerequisites
 
 - Rust toolchain 1.80+ (Rust 2024 edition) to build the binary via Cargo.
 - Node.js 18+ with a matching TypeScript/`tsserver` installation discoverable
   via your workspace (local `node_modules` preferred, but global/npm/Nix paths
-  are fine too).
+  are fine too). `ts-bridge` delegates all language intelligence to this
+  `tsserver`; it only provides the Rust shim and orchestrator.
 - Neovim 0.11+ so the built-in LSP client matches the capabilities advertised
   by `ts-bridge` (semantic tokens, inlay hints, etc.).
 
