@@ -1,5 +1,7 @@
 # ts-bridge
 
+[![](https://github.com/user-attachments/assets/7ea6bfbb-4031-44c2-9113-7248c0f1addf)](https://github.com/user-attachments/assets/7ea6bfbb-4031-44c2-9113-7248c0f1addf)
+
 `ts-bridge` is a standalone TypeScript language-server shim written in Rust. It
 sits between Neovim's built-in LSP client and `tsserver`, translating LSP
 requests into the TypeScript server protocol (and vice‑versa) while offering a
@@ -14,7 +16,6 @@ that mirrors how modern JS/TS tooling pipelines are organized.
   are fine too).
 - Neovim 0.11+ so the built-in LSP client matches the capabilities advertised
   by `ts-bridge` (semantic tokens, inlay hints, etc.).
-
 
 ## Building
 
