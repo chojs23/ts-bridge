@@ -42,6 +42,30 @@ Neovim `lspconfig` setup.
 
 Get the latest release artifact from the [GitHub Releases](https://github.com/chojs23/ts-bridge/releases) page.
 
+## Install script (Linux/macOS)
+
+The install script downloads the latest release archive from GitHub and places
+`ts-bridge` in `~/.local/bin` (override with `--install-dir`).
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/chojs23/ts-bridge/main/scripts/install.sh | bash
+```
+
+If you already cloned the repo:
+
+```bash
+./scripts/install.sh
+```
+
+To install a specific version:
+
+```bash
+./scripts/install.sh --version v0.4.0
+```
+
+The script requires `curl` or `wget` plus `tar`. Checksum verification uses
+`sha256sum` (Linux) or `shasum` (macOS) when available.
+
 ## LSP Feature Progress
 
 - [x] `initialize`/`initialized` handshake & server capabilities
@@ -80,7 +104,7 @@ local util = require("lspconfig.util")
 if not configs.ts_bridge then
   configs.ts_bridge = {
     default_config = {
-      cmd = { "/path/to/ts-bridge" },
+      cmd = { "ts-bridge" },
       filetypes = { "typescript", "typescriptreact", "javascript", "javascriptreact" },
       root_dir = util.root_pattern("tsconfig.json", "jsconfig.json", "package.json", ".git"),
     },
@@ -90,7 +114,7 @@ end
 local lspconfig = require("lspconfig")
 
 lspconfig.ts_bridge.setup({
-  cmd = { "/path/to/ts-bridge" },
+  cmd = { "ts-bridge" },
   settings = {
     ["ts-bridge"] = {
       separate_diagnostic_server = true,      -- launch syntax + semantic tsserver
@@ -109,6 +133,9 @@ lspconfig.ts_bridge.setup({
   },
 })
 ```
+
+If you built locally instead of installing, swap `cmd = { "ts-bridge" }` for the
+absolute binary path (for example, `cmd = { "/path/to/ts-bridge" }`).
 
 Because `ts-bridge` delays spawning `tsserver` until the first routed request,
 these defaults (or any overrides you make) apply to both syntax and semantic
@@ -165,7 +192,7 @@ local function ensure_ts_bridge_daemon()
   end
   vim.g.ts_bridge_daemon_started = true
   vim.fn.jobstart({
-    "/path/to/ts-bridge",
+    "ts-bridge",
     "daemon",
     "--listen",
     "127.0.0.1:7007", -- choose your port
