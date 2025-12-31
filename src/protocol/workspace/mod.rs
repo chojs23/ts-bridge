@@ -2,4 +2,6 @@
 //! workspace/* Handlers
 //! =============================================================================
 
+pub mod execute_command;
+pub mod rename;
 pub mod symbol;

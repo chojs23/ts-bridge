@@ -12,7 +12,7 @@ use lsp_types::{
 };
 use serde_json::{Value, json};
 
-use crate::protocol::RequestSpec;
+use crate::protocol::{AdapterResult, RequestSpec};
 use crate::rpc::{Priority, Route};
 use crate::utils::uri_to_file_path;
 
@@ -85,7 +85,7 @@ fn signature_trigger_reason(context: &SignatureHelpContext) -> Option<Value> {
     Some(Value::Object(obj))
 }
 
-fn adapt_signature_help(payload: &Value, _context: Option<&Value>) -> Result<Value> {
+fn adapt_signature_help(payload: &Value, _context: Option<&Value>) -> Result<AdapterResult> {
     let body = payload
         .get("body")
         .context("tsserver signatureHelp missing body")?;
@@ -112,7 +112,7 @@ fn adapt_signature_help(payload: &Value, _context: Option<&Value>) -> Result<Val
             .map(|v| v as u32),
     };
 
-    Ok(serde_json::to_value(help)?)
+    Ok(AdapterResult::ready(serde_json::to_value(help)?))
 }
 
 fn convert_signature(item: Value) -> Option<SignatureInformation> {

@@ -3,7 +3,7 @@ use lsp_types::{Location, SymbolKind, SymbolTag, WorkspaceSymbolParams};
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::protocol::RequestSpec;
+use crate::protocol::{AdapterResult, RequestSpec};
 use crate::rpc::{Priority, Route};
 use crate::utils::tsserver_span_to_location;
 
@@ -27,7 +27,7 @@ pub fn handle(params: WorkspaceSymbolParams) -> RequestSpec {
     }
 }
 
-fn adapt_workspace_symbols(payload: &Value, _context: Option<&Value>) -> Result<Value> {
+fn adapt_workspace_symbols(payload: &Value, _context: Option<&Value>) -> Result<AdapterResult> {
     let items = payload
         .get("body")
         .and_then(|v| v.as_array())
@@ -41,7 +41,7 @@ fn adapt_workspace_symbols(payload: &Value, _context: Option<&Value>) -> Result<
         }
     }
 
-    Ok(Value::Array(symbols))
+    Ok(AdapterResult::ready(Value::Array(symbols)))
 }
 
 fn convert_navto_item(item: &Value) -> Option<WorkspaceSymbol> {

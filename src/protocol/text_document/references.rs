@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use lsp_types::{Location, ReferenceParams};
 use serde_json::{Value, json};
 
-use crate::protocol::RequestSpec;
+use crate::protocol::{AdapterResult, RequestSpec};
 use crate::rpc::{Priority, Route};
 use crate::utils::{tsserver_span_to_location, uri_to_file_path};
 
@@ -43,7 +43,7 @@ pub fn handle(params: ReferenceParams) -> RequestSpec {
     }
 }
 
-fn adapt_references(payload: &Value, _context: Option<&Value>) -> Result<Value> {
+fn adapt_references(payload: &Value, _context: Option<&Value>) -> Result<AdapterResult> {
     let refs = payload
         .get("body")
         .context("tsserver references missing body")?
@@ -58,5 +58,5 @@ fn adapt_references(payload: &Value, _context: Option<&Value>) -> Result<Value> 
         }
     }
 
-    Ok(serde_json::to_value(locations)?)
+    Ok(AdapterResult::ready(serde_json::to_value(locations)?))
 }

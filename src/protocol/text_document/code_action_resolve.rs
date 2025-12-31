@@ -10,11 +10,11 @@ use anyhow::{Context, Result};
 use lsp_types::{CodeAction, CodeActionKind};
 use serde_json::{Value, json};
 
-use crate::protocol::RequestSpec;
 use crate::protocol::text_document::code_action::{
     CodeActionData, FixAllData, OrganizeImportsData, organize_imports_payload,
     workspace_edit_from_tsserver_changes,
 };
+use crate::protocol::{AdapterResult, RequestSpec};
 use crate::rpc::{Priority, Route};
 
 pub fn handle(mut action: CodeAction) -> Option<RequestSpec> {
@@ -68,7 +68,7 @@ fn build_organize_imports_request(
     })
 }
 
-fn adapt_fix_all_response(payload: &Value, context: Option<&Value>) -> Result<Value> {
+fn adapt_fix_all_response(payload: &Value, context: Option<&Value>) -> Result<AdapterResult> {
     let mut action: CodeAction =
         serde_json::from_value(context.cloned().context("missing code action context")?)?;
     let body = payload
@@ -89,10 +89,13 @@ fn adapt_fix_all_response(payload: &Value, context: Option<&Value>) -> Result<Va
         action.kind = Some(CodeActionKind::SOURCE_FIX_ALL);
     }
 
-    Ok(serde_json::to_value(action)?)
+    Ok(AdapterResult::ready(serde_json::to_value(action)?))
 }
 
-fn adapt_organize_imports_response(payload: &Value, context: Option<&Value>) -> Result<Value> {
+fn adapt_organize_imports_response(
+    payload: &Value,
+    context: Option<&Value>,
+) -> Result<AdapterResult> {
     let mut action: CodeAction =
         serde_json::from_value(context.cloned().context("missing code action context")?)?;
     let changes = payload
@@ -109,5 +112,5 @@ fn adapt_organize_imports_response(payload: &Value, context: Option<&Value>) -> 
         action.kind = Some(CodeActionKind::SOURCE_ORGANIZE_IMPORTS);
     }
 
-    Ok(serde_json::to_value(action)?)
+    Ok(AdapterResult::ready(serde_json::to_value(action)?))
 }

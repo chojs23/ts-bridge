@@ -12,10 +12,10 @@ use lsp_server::{
 };
 use lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionProviderCapability, CompletionOptions,
-    HoverProviderCapability, InitializeParams, InitializeResult, InlayHintOptions,
-    InlayHintServerCapabilities, OneOf, PositionEncodingKind, ProgressParams, ProgressParamsValue,
-    ProgressToken, PublishDiagnosticsParams, RenameOptions, ServerCapabilities,
-    SignatureHelpOptions, TextDocumentSyncCapability, TextDocumentSyncKind,
+    ExecuteCommandOptions, HoverProviderCapability, InitializeParams, InitializeResult,
+    InlayHintOptions, InlayHintServerCapabilities, OneOf, PositionEncodingKind, ProgressParams,
+    ProgressParamsValue, ProgressToken, PublishDiagnosticsParams, RenameOptions,
+    ServerCapabilities, SignatureHelpOptions, TextDocumentSyncCapability, TextDocumentSyncKind,
     TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TypeDefinitionProviderCapability,
     WorkDoneProgress as LspWorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressCreateParams,
     WorkDoneProgressEnd, WorkDoneProgressReport,
@@ -35,7 +35,7 @@ use crate::process::ServerKind;
 use crate::protocol::diagnostics::{DiagnosticsEvent, DiagnosticsKind};
 use crate::protocol::text_document::completion::TRIGGER_CHARACTERS;
 use crate::protocol::text_document::signature_help::TRIGGER_CHARACTERS as SIG_HELP_TRIGGER_CHARACTERS;
-use crate::protocol::{self, ResponseAdapter};
+use crate::protocol::{self, AdapterResult, ResponseAdapter};
 use crate::provider::Provider;
 use crate::rpc::{DispatchReceipt, Priority, Route, Service};
 use crate::utils::uri_to_file_path;
@@ -141,6 +141,13 @@ fn advertised_capabilities(settings: &PluginSettings) -> ServerCapabilities {
     } else {
         None
     };
+    let execute_command_provider = Some(ExecuteCommandOptions {
+        commands: crate::protocol::workspace::execute_command::USER_COMMANDS
+            .iter()
+            .map(|cmd| (*cmd).to_string())
+            .collect(),
+        work_done_progress_options: Default::default(),
+    });
     ServerCapabilities {
         position_encoding: Some(PositionEncodingKind::UTF16),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
@@ -156,6 +163,7 @@ fn advertised_capabilities(settings: &PluginSettings) -> ServerCapabilities {
         document_formatting_provider: Some(OneOf::Left(true)),
         semantic_tokens_provider: Some(semantic_tokens_provider),
         inlay_hint_provider,
+        execute_command_provider,
         text_document_sync: Some(TextDocumentSyncCapability::Options(text_sync)),
         ..Default::default()
     }
@@ -449,7 +457,9 @@ fn drain_tsserver(
                 diag_state.reset_if_idle();
             }
             continue;
-        } else if let Some(response) = pending.resolve(event.server, &event.payload, inlay_cache)? {
+        } else if let Some(response) =
+            pending.resolve(event.server, &event.payload, inlay_cache, service)?
+        {
             connection.sender.send(response.into())?;
         } else {
             log::trace!("tsserver {:?} -> {}", event.server, event.payload);
@@ -655,6 +665,7 @@ impl PendingRequests {
         server: ServerKind,
         payload: &Value,
         inlay_cache: &mut InlayHintCache,
+        service: &mut Service,
     ) -> anyhow::Result<Option<Response>> {
         if payload
             .get("type")
@@ -685,11 +696,51 @@ impl PendingRequests {
 
         if success {
             match (entry.adapter)(payload, entry.context.as_ref()) {
-                Ok(result) => {
+                Ok(AdapterResult::Ready(result)) => {
                     if let Some(postprocess) = entry.postprocess {
                         postprocess.apply(&result, inlay_cache)?;
                     }
                     Ok(Some(Response::new_ok(entry.id, result)))
+                }
+                Ok(AdapterResult::Continue(next_spec)) => {
+                    let request_id = entry.id;
+                    let postprocess = entry.postprocess;
+                    let Some(adapter) = next_spec.on_response else {
+                        return Ok(Some(Response::new_err(
+                            request_id,
+                            ErrorCode::InternalError as i32,
+                            "handler missing response adapter".to_string(),
+                        )));
+                    };
+                    match service.dispatch_request(
+                        next_spec.route,
+                        next_spec.payload,
+                        next_spec.priority,
+                    ) {
+                        Ok(receipts) => {
+                            if receipts.is_empty() {
+                                Ok(Some(Response::new_err(
+                                    request_id,
+                                    ErrorCode::InternalError as i32,
+                                    "tsserver route produced no requests".to_string(),
+                                )))
+                            } else {
+                                self.track(
+                                    &receipts,
+                                    request_id,
+                                    adapter,
+                                    next_spec.response_context,
+                                    postprocess,
+                                );
+                                Ok(None)
+                            }
+                        }
+                        Err(err) => Ok(Some(Response::new_err(
+                            request_id,
+                            ErrorCode::InternalError as i32,
+                            format!("failed to dispatch tsserver request: {err}"),
+                        ))),
+                    }
                 }
                 Err(err) => Ok(Some(Response::new_err(
                     entry.id,

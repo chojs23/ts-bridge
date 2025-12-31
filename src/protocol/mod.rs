@@ -15,7 +15,18 @@ pub mod diagnostics;
 pub mod text_document;
 pub mod workspace;
 
-pub type ResponseAdapter = fn(&Value, Option<&Value>) -> anyhow::Result<Value>;
+pub enum AdapterResult {
+    Ready(Value),
+    Continue(RequestSpec),
+}
+
+impl AdapterResult {
+    pub fn ready(value: Value) -> Self {
+        Self::Ready(value)
+    }
+}
+
+pub type ResponseAdapter = fn(&Value, Option<&Value>) -> anyhow::Result<AdapterResult>;
 
 #[derive(Debug)]
 pub struct RequestSpec {
@@ -105,6 +116,14 @@ pub fn route_request(method: &str, params: Value) -> Option<RequestSpec> {
         lsp_types::request::WorkspaceSymbolRequest::METHOD => {
             let params: lsp_types::WorkspaceSymbolParams = serde_json::from_value(params).ok()?;
             Some(workspace::symbol::handle(params))
+        }
+        lsp_types::request::WillRenameFiles::METHOD => {
+            let params: lsp_types::RenameFilesParams = serde_json::from_value(params).ok()?;
+            workspace::rename::handle(params)
+        }
+        lsp_types::request::ExecuteCommand::METHOD => {
+            let params: lsp_types::ExecuteCommandParams = serde_json::from_value(params).ok()?;
+            workspace::execute_command::handle(params)
         }
         _ => None,
     }

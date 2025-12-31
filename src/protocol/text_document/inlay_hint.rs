@@ -11,7 +11,7 @@ use lsp_types::{InlayHint, InlayHintKind, InlayHintLabel, InlayHintParams};
 use serde_json::{Value, json};
 
 use crate::documents::TextSpan;
-use crate::protocol::RequestSpec;
+use crate::protocol::{AdapterResult, RequestSpec};
 use crate::rpc::{Priority, Route};
 use crate::utils::{tsserver_position_value_lsp, uri_to_file_path};
 
@@ -39,7 +39,7 @@ pub fn handle(params: InlayHintParams, span: TextSpan) -> RequestSpec {
     }
 }
 
-fn adapt_inlay_hints(payload: &Value, _context: Option<&Value>) -> Result<Value> {
+fn adapt_inlay_hints(payload: &Value, _context: Option<&Value>) -> Result<AdapterResult> {
     let entries = payload
         .get("body")
         .and_then(|value| value.as_array())
@@ -52,7 +52,7 @@ fn adapt_inlay_hints(payload: &Value, _context: Option<&Value>) -> Result<Value>
         }
     }
 
-    Ok(serde_json::to_value(hints)?)
+    Ok(AdapterResult::ready(serde_json::to_value(hints)?))
 }
 
 fn convert_hint(entry: &Value) -> Option<InlayHint> {

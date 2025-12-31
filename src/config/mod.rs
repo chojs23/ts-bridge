@@ -6,7 +6,7 @@
 //! jsx helpers, tsserver memory limits, etc.) and exposes typed structures that
 //! other subsystems borrow.
 
-use std::{path::PathBuf, str::FromStr};
+use std::path::PathBuf;
 
 use serde_json::{Map, Value};
 

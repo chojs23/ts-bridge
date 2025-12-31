@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use lsp_types::{DocumentFormattingParams, TextEdit};
 use serde_json::{Value, json};
 
-use crate::protocol::RequestSpec;
+use crate::protocol::{AdapterResult, RequestSpec};
 use crate::rpc::{Priority, Route};
 use crate::utils::{tsserver_range_from_value_lsp, uri_to_file_path};
 
@@ -42,7 +42,7 @@ pub fn handle(params: DocumentFormattingParams) -> RequestSpec {
     }
 }
 
-fn adapt_formatting(payload: &Value, _context: Option<&Value>) -> Result<Value> {
+fn adapt_formatting(payload: &Value, _context: Option<&Value>) -> Result<AdapterResult> {
     let edits = payload
         .get("body")
         .context("tsserver format missing body")?
@@ -61,7 +61,7 @@ fn adapt_formatting(payload: &Value, _context: Option<&Value>) -> Result<Value> 
         lsp_edits.push(TextEdit { range, new_text });
     }
 
-    Ok(serde_json::to_value(lsp_edits)?)
+    Ok(AdapterResult::ready(serde_json::to_value(lsp_edits)?))
 }
 
 fn format_code_settings(options: &lsp_types::FormattingOptions) -> Value {

@@ -12,7 +12,7 @@ use lsp_types::{
 };
 use serde_json::{Value, json};
 
-use crate::protocol::RequestSpec;
+use crate::protocol::{AdapterResult, RequestSpec};
 use crate::rpc::{Priority, Route};
 use crate::utils::{
     completion_commit_characters, completion_item_kind_from_tsserver,
@@ -79,7 +79,7 @@ pub fn handle(params: CompletionParams) -> RequestSpec {
     }
 }
 
-fn adapt_completion(payload: &Value, context: Option<&Value>) -> Result<Value> {
+fn adapt_completion(payload: &Value, context: Option<&Value>) -> Result<AdapterResult> {
     let ctx = context.context("completion context missing")?;
     let file = ctx
         .get("file")
@@ -119,7 +119,9 @@ fn adapt_completion(payload: &Value, context: Option<&Value>) -> Result<Value> {
         is_incomplete,
         items,
     };
-    Ok(serde_json::to_value(CompletionResponse::List(list))?)
+    Ok(AdapterResult::ready(serde_json::to_value(
+        CompletionResponse::List(list),
+    )?))
 }
 
 fn convert_entry(entry: &Value, file: &str, position: &Position) -> Option<CompletionItem> {

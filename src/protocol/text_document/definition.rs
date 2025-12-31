@@ -13,7 +13,7 @@ use lsp_types::{GotoDefinitionParams, GotoDefinitionResponse};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::protocol::RequestSpec;
+use crate::protocol::{AdapterResult, RequestSpec};
 use crate::rpc::{Priority, Route};
 use crate::utils::{
     tsserver_range_from_value_lsp, tsserver_span_to_location_link, uri_to_file_path,
@@ -69,7 +69,7 @@ pub fn handle(params: DefinitionParams) -> RequestSpec {
     }
 }
 
-fn adapt_definition(payload: &Value, _context: Option<&Value>) -> Result<Value> {
+fn adapt_definition(payload: &Value, _context: Option<&Value>) -> Result<AdapterResult> {
     let command = payload
         .get("command")
         .and_then(|cmd| cmd.as_str())
@@ -101,7 +101,7 @@ fn adapt_definition(payload: &Value, _context: Option<&Value>) -> Result<Value> 
     }
 
     let response = GotoDefinitionResponse::Link(links);
-    Ok(serde_json::to_value(response)?)
+    Ok(AdapterResult::ready(serde_json::to_value(response)?))
 }
 
 #[cfg(test)]
