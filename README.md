@@ -64,8 +64,34 @@ Get the latest release artifact from the [GitHub Releases](https://github.com/ch
 - [x] Semantic tokens
 - [x] Inlay hints
 - [ ] Code lens
-- [ ] Custom commands / user APIs (organize imports, fix missing imports, etc.)
+- [x] Custom commands / user APIs (organize imports, fix missing imports, etc.)
 - [ ] Dual-process (semantic diagnostics server) feature gating _(experimental)_
+
+## Execute Commands
+
+`ts-bridge` surfaces a handful of custom commands over `workspace/executeCommand`.
+Each identifier mirrors the features from `typescript-tools.nvim`:
+
+- `TSBOrganizeImports` – full organize (remove unused + sort + combine).
+- `TSBSortImports` – organize in sort/combine mode only.
+- `TSBRemoveUnusedImports` – remove unused imports without sorting.
+- `TSBRemoveUnused` – run the `unusedIdentifier` fix-all across the file.
+- `TSBAddMissingImports` – add imports that TypeScript can infer automatically.
+- `TSBFixAll` – chain a few common fix-all IDs (implements missing members, etc.).
+- `TSBGoToSourceDefinition` – prefer concrete `.ts/.tsx` definitions over `.d.ts`.
+- `TSBRenameFile` – request the edits tsserver suggests after renaming this file.
+- `TSBFileReferences` – list files that reference the current file.
+- `TSBSymbolReferences` – fetch all references for the symbol under the cursor.
+- `TSBReloadProjects` – instruct tsserver to rebuild project graphs.
+- `TSBStatus` – surface raw `tsserver --status` output for debugging.
+
+File-scoped commands accept a single `TextDocumentIdentifier` argument; position-sensitive commands
+(`TSBGoToSourceDefinition`) expect a `TextDocumentPositionParams`. File rename commands accept either
+a single object with `oldUri`/`newUri` fields or the `files` array produced by `workspace/willRenameFiles`.
+Every response is a plain LSP payload (`WorkspaceEdit` or `Location[]`), so clients can keep using helpers
+like `vim.lsp.util.apply_workspace_edit` or `locations_to_items`.
+
+`workspace/willRenameFiles` is implemented as well, letting clients fetch edits before renaming files on disk.
 
 ## Configuration
 
