@@ -21,7 +21,6 @@ etc.) that mirrors how modern JS/TS tooling pipelines are organized.
 
 ## Prerequisites
 
-- Rust toolchain 1.80+ (Rust 2024 edition) to build the binary via Cargo.
 - Node.js 18+ with a matching TypeScript/`tsserver` installation discoverable
   via your workspace (local `node_modules` preferred, but global/npm/Nix paths
   are fine too). `ts-bridge` delegates all language intelligence to this
@@ -30,6 +29,8 @@ etc.) that mirrors how modern JS/TS tooling pipelines are organized.
   by `ts-bridge` (semantic tokens, inlay hints, etc.).
 
 ## Building
+
+You need Rust and Cargo installed. Then clone the repo and run:
 
 ```bash
 cargo build --release
@@ -65,6 +66,34 @@ To install a specific version:
 
 The script requires `curl` or `wget` plus `tar`. Checksum verification uses
 `sha256sum` (Linux) or `shasum` (macOS) when available.
+
+GitHub’s `/releases/latest` points to the newest non‑pre‑release tag, so you do
+not need to create a separate “latest” tag. Use `--version` to pin a specific
+release (including pre‑releases).
+
+## Install script (Windows PowerShell)
+
+The PowerShell script downloads the Windows release archive and installs
+`ts-bridge.exe` into `%LOCALAPPDATA%\Programs\ts-bridge\bin` by default.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-RestMethod -Uri 'https://raw.githubusercontent.com/chojs23/ts-bridge/main/scripts/install.ps1' | Invoke-Expression"
+```
+
+If you already cloned the repo:
+
+```powershell
+.\scripts\install.ps1
+```
+
+To install a specific version:
+
+```powershell
+.\scripts\install.ps1 -Version v0.4.0
+```
+
+Pass `-InstallDir` to override the destination or `-NoVerify` to skip checksum
+verification.
 
 ## LSP Feature Progress
 
