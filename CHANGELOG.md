@@ -6,6 +6,20 @@ All notable changes to this project will be documented in this file. The format 
 
 - Placeholder for upcoming changes.
 
+## [0.2.0] - 2025-12-31
+
+### Added
+- Introduced daemon mode with TCP/Unix listeners, shared per-project `tsserver` instances, and a restart control command.
+- Added idle TTL eviction for daemon project caches with a 30‑minute default and CLI/env configuration.
+- Added install scripts for Linux/macOS (`scripts/install.sh`) and Windows PowerShell (`scripts/install.ps1`).
+- Documented daemon mode, auto-start patterns, and install scripts in the README.
+
+### Changed
+- Updated README `nvim-lspconfig` examples to use `cmd = { "ts-bridge" }` by default.
+
+### Fixed
+- Updated adapter tests to unwrap `AdapterResult` before deserializing responses.
+
 ## [0.1.0] - 2025-12-30
 
 - First public release of `ts-bridge`, a standalone shim that translates Neovim LSP traffic to the TypeScript server protocol while mirroring modern tooling layers (`config`, `provider`, `process`, `protocol`).
