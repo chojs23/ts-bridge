@@ -9,4 +9,4 @@ pub mod server;
 pub mod types;
 pub mod utils;
 
-pub use server::run_stdio_server;
+pub use server::{DaemonConfig, run_daemon_server, run_stdio_server};

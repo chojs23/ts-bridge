@@ -51,6 +51,11 @@ impl RequestQueue {
         self.queue.pop_front()
     }
 
+    pub fn reset(&mut self) {
+        self.seq = 0;
+        self.queue.clear();
+    }
+
     fn next_seq(&mut self) -> u64 {
         let seq = self.seq;
         self.seq += 1;

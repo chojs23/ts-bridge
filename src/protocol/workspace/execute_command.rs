@@ -45,6 +45,7 @@ pub const USER_COMMANDS: &[&str] = &[
     "TSBGoToSourceDefinition",
     "TSBRenameFile",
     "TSBFileReferences",
+    "TSBRestartProject",
 ];
 
 pub fn handle(params: ExecuteCommandParams) -> Option<RequestSpec> {

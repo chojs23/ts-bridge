@@ -12,7 +12,7 @@ use serde_json::{Map, Value};
 
 /// Settings that are evaluated once during plugin setup (analogous to the Lua
 /// `settings` table).  Additional fields will be introduced as we port features.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PluginSettings {
     /// Whether we spin up a paired semantic tsserver dedicated to diagnostics.
     pub separate_diagnostic_server: bool,
@@ -54,7 +54,7 @@ impl DiagnosticPublishMode {
 }
 
 /// Global configuration facade that exposes read-only handles to each settings struct.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Config {
     plugin: PluginSettings,
 }
