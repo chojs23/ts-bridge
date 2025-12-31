@@ -12,7 +12,7 @@ use lsp_types::{DocumentHighlight, DocumentHighlightKind, DocumentHighlightParam
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::protocol::RequestSpec;
+use crate::protocol::{AdapterResult, RequestSpec};
 use crate::rpc::{Priority, Route};
 use crate::utils::{tsserver_range_from_value_lsp, uri_to_file_path};
 
@@ -49,7 +49,7 @@ pub fn handle(params: DocumentHighlightParams) -> RequestSpec {
     }
 }
 
-fn adapt_document_highlights(payload: &Value, context: Option<&Value>) -> Result<Value> {
+fn adapt_document_highlights(payload: &Value, context: Option<&Value>) -> Result<AdapterResult> {
     let ctx: HighlightContext = serde_json::from_value(
         context
             .cloned()
@@ -88,7 +88,7 @@ fn adapt_document_highlights(payload: &Value, context: Option<&Value>) -> Result
         }
     }
 
-    Ok(serde_json::to_value(highlights)?)
+    Ok(AdapterResult::ready(serde_json::to_value(highlights)?))
 }
 
 fn highlight_kind_from_ts_kind(kind: &str) -> Option<DocumentHighlightKind> {

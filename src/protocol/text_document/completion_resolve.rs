@@ -15,7 +15,7 @@ use lsp_types::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::protocol::RequestSpec;
+use crate::protocol::{AdapterResult, RequestSpec};
 use crate::rpc::{Priority, Route};
 use crate::utils::tsserver_range_from_value_lsp;
 
@@ -52,7 +52,7 @@ pub fn handle(mut item: CompletionItem) -> Option<RequestSpec> {
     })
 }
 
-fn adapt_completion_resolve(payload: &Value, context: Option<&Value>) -> Result<Value> {
+fn adapt_completion_resolve(payload: &Value, context: Option<&Value>) -> Result<AdapterResult> {
     let mut item: CompletionItem =
         serde_json::from_value(context.cloned().context("missing completion item")?)?;
     let details = payload
@@ -80,7 +80,7 @@ fn adapt_completion_resolve(payload: &Value, context: Option<&Value>) -> Result<
         inject_snippet(&mut item, details);
     }
 
-    Ok(serde_json::to_value(item)?)
+    Ok(AdapterResult::ready(serde_json::to_value(item)?))
 }
 
 fn render_display_parts(parts: Option<&Value>) -> Option<String> {

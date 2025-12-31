@@ -12,7 +12,7 @@ use lsp_types::{
 };
 use serde_json::{Value, json};
 
-use crate::protocol::RequestSpec;
+use crate::protocol::{AdapterResult, RequestSpec};
 use crate::rpc::{Priority, Route};
 use crate::utils::tsserver_range_from_value_lsp;
 
@@ -111,7 +111,7 @@ fn clamp_range_length(range: &lsp_types::Range) -> u32 {
     lines.saturating_mul(10_000).min(5_000_000)
 }
 
-fn adapt_semantic_tokens(payload: &Value, _context: Option<&Value>) -> Result<Value> {
+fn adapt_semantic_tokens(payload: &Value, _context: Option<&Value>) -> Result<AdapterResult> {
     let body = payload
         .get("body")
         .context("tsserver semanticClassifications missing body")?;
@@ -184,7 +184,7 @@ fn adapt_semantic_tokens(payload: &Value, _context: Option<&Value>) -> Result<Va
         result_id: None,
         data,
     };
-    Ok(serde_json::to_value(response)?)
+    Ok(AdapterResult::ready(serde_json::to_value(response)?))
 }
 
 #[cfg(test)]

@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use lsp_types::{GotoDefinitionParams, GotoDefinitionResponse};
 use serde_json::{Value, json};
 
-use crate::protocol::RequestSpec;
+use crate::protocol::{AdapterResult, RequestSpec};
 use crate::rpc::{Priority, Route};
 use crate::utils::{tsserver_span_to_location_link, uri_to_file_path};
 
@@ -39,7 +39,7 @@ pub fn handle(params: GotoDefinitionParams) -> RequestSpec {
     }
 }
 
-fn adapt_type_definition(payload: &Value, _context: Option<&Value>) -> Result<Value> {
+fn adapt_type_definition(payload: &Value, _context: Option<&Value>) -> Result<AdapterResult> {
     let body = payload
         .get("body")
         .context("tsserver typeDefinition missing body")?;
@@ -55,5 +55,5 @@ fn adapt_type_definition(payload: &Value, _context: Option<&Value>) -> Result<Va
     }
 
     let response = GotoDefinitionResponse::Link(links);
-    Ok(serde_json::to_value(response)?)
+    Ok(AdapterResult::ready(serde_json::to_value(response)?))
 }

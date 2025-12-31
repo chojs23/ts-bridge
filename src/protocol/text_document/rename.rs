@@ -16,7 +16,7 @@ use lsp_types::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::protocol::RequestSpec;
+use crate::protocol::{AdapterResult, RequestSpec};
 use crate::rpc::{Priority, Route};
 use crate::utils::{tsserver_file_to_uri, tsserver_range_from_value_lsp, uri_to_file_path};
 
@@ -87,7 +87,7 @@ pub fn handle(params: RenameParams) -> RequestSpec {
     }
 }
 
-fn adapt_prepare_rename(payload: &Value, _context: Option<&Value>) -> Result<Value> {
+fn adapt_prepare_rename(payload: &Value, _context: Option<&Value>) -> Result<AdapterResult> {
     let body = payload.get("body").context("rename info missing body")?;
     let info = body.get("info").unwrap_or(body);
     let can_rename = info
@@ -118,10 +118,10 @@ fn adapt_prepare_rename(payload: &Value, _context: Option<&Value>) -> Result<Val
         .to_string();
 
     let response = PrepareRenameResponse::RangeWithPlaceholder { range, placeholder };
-    Ok(serde_json::to_value(response)?)
+    Ok(AdapterResult::ready(serde_json::to_value(response)?))
 }
 
-fn adapt_rename(payload: &Value, context: Option<&Value>) -> Result<Value> {
+fn adapt_rename(payload: &Value, context: Option<&Value>) -> Result<AdapterResult> {
     let ctx: RenameContext =
         serde_json::from_value(context.cloned().context("missing rename context")?)?;
     let body = payload.get("body").context("rename missing body")?;
@@ -168,7 +168,7 @@ fn adapt_rename(payload: &Value, context: Option<&Value>) -> Result<Value> {
         document_changes: None,
         change_annotations: None,
     };
-    Ok(serde_json::to_value(edit)?)
+    Ok(AdapterResult::ready(serde_json::to_value(edit)?))
 }
 
 fn rename_span_to_range(value: &Value) -> Option<lsp_types::Range> {

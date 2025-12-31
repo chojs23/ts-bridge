@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 use lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind};
 use serde_json::{Value, json};
 
-use crate::protocol::RequestSpec;
+use crate::protocol::{AdapterResult, RequestSpec};
 use crate::rpc::{Priority, Route};
 use crate::utils::{tsserver_range_from_value_lsp, uri_to_file_path};
 
@@ -39,7 +39,7 @@ pub fn handle(params: lsp_types::HoverParams) -> RequestSpec {
     }
 }
 
-fn adapt_quickinfo(payload: &Value, _context: Option<&Value>) -> Result<Value> {
+fn adapt_quickinfo(payload: &Value, _context: Option<&Value>) -> Result<AdapterResult> {
     let body = payload
         .get("body")
         .context("tsserver quickinfo missing body")?;
@@ -73,7 +73,7 @@ fn adapt_quickinfo(payload: &Value, _context: Option<&Value>) -> Result<Value> {
         range: tsserver_range_from_value_lsp(body),
     };
 
-    Ok(serde_json::to_value(hover)?)
+    Ok(AdapterResult::ready(serde_json::to_value(hover)?))
 }
 
 fn flatten_symbol_display(

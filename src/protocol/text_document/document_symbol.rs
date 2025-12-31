@@ -10,7 +10,7 @@ use lsp_types::{DocumentSymbolParams, Range, SymbolKind, SymbolTag};
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::protocol::RequestSpec;
+use crate::protocol::{AdapterResult, RequestSpec};
 use crate::rpc::{Priority, Route};
 use crate::utils::{tsserver_range_from_value_lsp, uri_to_file_path};
 
@@ -32,7 +32,7 @@ pub fn handle(params: DocumentSymbolParams) -> RequestSpec {
     }
 }
 
-fn adapt_document_symbols(payload: &Value, _context: Option<&Value>) -> Result<Value> {
+fn adapt_document_symbols(payload: &Value, _context: Option<&Value>) -> Result<AdapterResult> {
     let body = payload
         .get("body")
         .context("tsserver navtree missing body")?;
@@ -55,7 +55,7 @@ fn adapt_document_symbols(payload: &Value, _context: Option<&Value>) -> Result<V
     }
 
     let serialized = symbols.into_iter().map(|symbol| json!(symbol)).collect();
-    Ok(Value::Array(serialized))
+    Ok(AdapterResult::ready(Value::Array(serialized)))
 }
 
 fn build_symbol(node: &Value) -> Option<BridgeDocumentSymbol> {

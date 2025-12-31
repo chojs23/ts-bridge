@@ -19,7 +19,7 @@ use lsp_types::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::protocol::RequestSpec;
+use crate::protocol::{AdapterResult, RequestSpec};
 use crate::rpc::{Priority, Route};
 use crate::utils::{tsserver_file_to_uri, tsserver_range_from_value_lsp, uri_to_file_path};
 
@@ -131,7 +131,7 @@ fn organize_imports_request(file: String) -> RequestSpec {
     }
 }
 
-fn adapt_code_actions(payload: &Value, context: Option<&Value>) -> Result<Value> {
+fn adapt_code_actions(payload: &Value, context: Option<&Value>) -> Result<AdapterResult> {
     let adapter_ctx: AdapterContext =
         serde_json::from_value(context.cloned().context("code action context missing")?)?;
     let fixes = payload
@@ -156,7 +156,9 @@ fn adapt_code_actions(payload: &Value, context: Option<&Value>) -> Result<Value>
         }
     }
 
-    Ok(serde_json::to_value(CodeActionResponse::from(actions))?)
+    Ok(AdapterResult::ready(serde_json::to_value(
+        CodeActionResponse::from(actions),
+    )?))
 }
 
 fn build_quick_fix(fix: &Value, ctx: &AdapterContext) -> Option<CodeAction> {
@@ -262,7 +264,7 @@ pub(crate) fn workspace_edit_from_tsserver_changes(changes: &[Value]) -> Option<
     }
 }
 
-fn adapt_organize_imports(payload: &Value, _context: Option<&Value>) -> Result<Value> {
+fn adapt_organize_imports(payload: &Value, _context: Option<&Value>) -> Result<AdapterResult> {
     let changes = payload
         .get("body")
         .and_then(|value| value.as_array())
@@ -280,7 +282,9 @@ fn adapt_organize_imports(payload: &Value, _context: Option<&Value>) -> Result<V
         actions.push(CodeActionOrCommand::CodeAction(action));
     }
 
-    Ok(serde_json::to_value(CodeActionResponse::from(actions))?)
+    Ok(AdapterResult::ready(serde_json::to_value(
+        CodeActionResponse::from(actions),
+    )?))
 }
 
 fn matches_kind(kind: &CodeActionKind, needle: &str) -> bool {
