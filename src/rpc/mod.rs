@@ -175,6 +175,24 @@ impl Service {
         self.config = new_config;
     }
 
+    pub fn restart(
+        &mut self,
+        restart_syntax: bool,
+        restart_semantic: bool,
+    ) -> Result<(), ServiceError> {
+        if restart_syntax {
+            self.syntax = None;
+            self.syntax_rx = None;
+            self.syntax_queue.reset();
+        }
+        if restart_semantic {
+            self.semantic = None;
+            self.semantic_rx = None;
+            self.semantic_queue.reset();
+        }
+        Ok(())
+    }
+
     pub fn config(&self) -> &Config {
         &self.config
     }
@@ -194,7 +212,7 @@ pub enum ServiceError {
     ProcessNotStarted,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ServerEvent {
     pub server: ServerKind,
     pub payload: Value,

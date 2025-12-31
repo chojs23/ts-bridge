@@ -24,8 +24,14 @@ pub struct DocumentStore {
 impl DocumentStore {
     /// Inserts or replaces the document snapshot whenever Neovim fires
     /// textDocument/didOpen.
-    pub fn open(&mut self, uri: &Uri, text: &str, version: Option<i32>) {
-        let state = DocumentState::new(text, version);
+    pub fn open(
+        &mut self,
+        uri: &Uri,
+        text: &str,
+        version: Option<i32>,
+        language_id: Option<String>,
+    ) {
+        let state = DocumentState::new(text, version, language_id);
         self.docs.insert(uri.to_string(), state);
     }
 
@@ -49,6 +55,22 @@ impl DocumentStore {
     /// Drops the cached snapshot as soon as the client closes the buffer.
     pub fn close(&mut self, uri: &Uri) {
         self.docs.remove(uri.as_str());
+    }
+
+    pub fn is_open(&self, uri: &Uri) -> bool {
+        self.docs.contains_key(uri.as_str())
+    }
+
+    pub fn open_documents(&self) -> Vec<OpenDocumentSnapshot> {
+        self.docs
+            .iter()
+            .map(|(uri, doc)| OpenDocumentSnapshot {
+                uri: uri.clone(),
+                text: doc.text.clone(),
+                version: doc.version,
+                language_id: doc.language_id.clone(),
+            })
+            .collect()
     }
 
     /// Converts a visible LSP range into a tsserver-style text span measured in
@@ -80,15 +102,17 @@ struct DocumentState {
     line_metrics: Vec<LineMetrics>,
     total_utf16: u32,
     version: Option<i32>,
+    language_id: Option<String>,
 }
 
 impl DocumentState {
-    fn new(text: &str, version: Option<i32>) -> Self {
+    fn new(text: &str, version: Option<i32>, language_id: Option<String>) -> Self {
         let mut state = Self {
             text: text.to_string(),
             line_metrics: Vec::new(),
             total_utf16: 0,
             version,
+            language_id,
         };
         state.recompute_metrics();
         state
@@ -253,4 +277,11 @@ fn convert_position(position: &PluginPosition) -> LspPosition {
         line: position.line,
         character: position.character,
     }
+}
+
+pub struct OpenDocumentSnapshot {
+    pub uri: String,
+    pub text: String,
+    pub version: Option<i32>,
+    pub language_id: Option<String>,
 }
