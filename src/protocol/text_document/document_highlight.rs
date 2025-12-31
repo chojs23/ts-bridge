@@ -46,6 +46,7 @@ pub fn handle(params: DocumentHighlightParams) -> RequestSpec {
         priority: Priority::Normal,
         on_response: Some(adapt_document_highlights),
         response_context: Some(context),
+        work_done: None,
     }
 }
 

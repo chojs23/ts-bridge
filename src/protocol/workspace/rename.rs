@@ -33,6 +33,7 @@ pub fn handle(params: RenameFilesParams) -> Option<RequestSpec> {
         priority: Priority::Low,
         on_response: Some(adapt_rename_chain),
         response_context: Some(context),
+        work_done: None,
     })
 }
 
@@ -59,6 +60,7 @@ fn adapt_rename_chain(payload: &Value, context: Option<&Value>) -> Result<Adapte
             priority: Priority::Low,
             on_response: Some(adapt_rename_chain),
             response_context: Some(context),
+            work_done: None,
         }));
     }
 

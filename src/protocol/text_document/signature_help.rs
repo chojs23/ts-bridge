@@ -52,6 +52,7 @@ pub fn handle(params: SignatureHelpParams) -> RequestSpec {
         priority: Priority::Normal,
         on_response: Some(adapt_signature_help),
         response_context: None,
+        work_done: None,
     }
 }
 

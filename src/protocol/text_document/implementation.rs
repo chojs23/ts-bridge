@@ -37,6 +37,7 @@ pub fn handle(params: GotoDefinitionParams) -> RequestSpec {
         priority: Priority::Normal,
         on_response: Some(adapt_implementation),
         response_context: None,
+        work_done: None,
     }
 }
 

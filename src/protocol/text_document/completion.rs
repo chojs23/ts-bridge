@@ -76,6 +76,7 @@ pub fn handle(params: CompletionParams) -> RequestSpec {
                 "character": position.character,
             }
         })),
+        work_done: None,
     }
 }
 

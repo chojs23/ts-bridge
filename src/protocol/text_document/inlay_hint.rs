@@ -36,6 +36,7 @@ pub fn handle(params: InlayHintParams, span: TextSpan) -> RequestSpec {
         priority: Priority::Low,
         on_response: Some(adapt_inlay_hints),
         response_context: None,
+        work_done: None,
     }
 }
 

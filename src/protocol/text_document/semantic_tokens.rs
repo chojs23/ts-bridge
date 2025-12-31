@@ -76,6 +76,7 @@ pub fn handle_full(params: SemanticTokensParams) -> RequestSpec {
         priority: Priority::Low,
         on_response: Some(adapt_semantic_tokens),
         response_context: None,
+        work_done: None,
     }
 }
 
@@ -103,6 +104,7 @@ pub fn handle_range(params: lsp_types::SemanticTokensRangeParams) -> RequestSpec
         priority: Priority::Low,
         on_response: Some(adapt_semantic_tokens),
         response_context: None,
+        work_done: None,
     }
 }
 

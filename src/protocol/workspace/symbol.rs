@@ -24,6 +24,7 @@ pub fn handle(params: WorkspaceSymbolParams) -> RequestSpec {
         priority: Priority::Normal,
         on_response: Some(adapt_workspace_symbols),
         response_context: None,
+        work_done: None,
     }
 }
 

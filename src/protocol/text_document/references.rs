@@ -40,6 +40,7 @@ pub fn handle(params: ReferenceParams) -> RequestSpec {
         priority: Priority::Normal,
         on_response: Some(adapt_references),
         response_context: None,
+        work_done: None,
     }
 }
 

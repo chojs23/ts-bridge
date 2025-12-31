@@ -116,6 +116,7 @@ pub fn handle(params: CodeActionParams) -> RequestSpec {
         priority: Priority::Normal,
         on_response: Some(adapt_code_actions),
         response_context: Some(adapter_context),
+        work_done: None,
     }
 }
 
@@ -128,6 +129,7 @@ fn organize_imports_request(file: String) -> RequestSpec {
         priority: Priority::Low,
         on_response: Some(adapt_organize_imports),
         response_context: None,
+        work_done: None,
     }
 }
 

@@ -39,6 +39,7 @@ pub fn handle(params: DocumentFormattingParams) -> RequestSpec {
         priority: Priority::Normal,
         on_response: Some(adapt_formatting),
         response_context: None,
+        work_done: None,
     }
 }
 

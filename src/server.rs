@@ -35,7 +35,7 @@ use crate::process::ServerKind;
 use crate::protocol::diagnostics::{DiagnosticsEvent, DiagnosticsKind};
 use crate::protocol::text_document::completion::TRIGGER_CHARACTERS;
 use crate::protocol::text_document::signature_help::TRIGGER_CHARACTERS as SIG_HELP_TRIGGER_CHARACTERS;
-use crate::protocol::{self, AdapterResult, ResponseAdapter};
+use crate::protocol::{self, AdapterResult, ResponseAdapter, WorkDoneProgressSpec};
 use crate::provider::Provider;
 use crate::rpc::{DispatchReceipt, Priority, Route, Service};
 use crate::utils::uri_to_file_path;
@@ -457,10 +457,13 @@ fn drain_tsserver(
                 diag_state.reset_if_idle();
             }
             continue;
-        } else if let Some(response) =
+        } else if let Some(outcome) =
             pending.resolve(event.server, &event.payload, inlay_cache, service)?
         {
-            connection.sender.send(response.into())?;
+            if let Some(response) = outcome.response {
+                connection.sender.send(response.into())?;
+            }
+            complete_work_done(connection, outcome.work_done);
         } else {
             log::trace!("tsserver {:?} -> {}", event.server, event.payload);
         }
@@ -579,11 +582,19 @@ fn handle_request(
         spec = protocol::route_request(&method, params_value);
     }
 
-    if let Some(spec) = spec {
+    if let Some(mut spec) = spec {
+        let mut work_done_handle = None;
+        if let Some(progress_spec) = spec.work_done.take() {
+            match begin_work_done(connection, &progress_spec) {
+                Ok(handle) => work_done_handle = Some(handle),
+                Err(err) => log::debug!("work-done progress begin failed: {err:?}"),
+            }
+        }
         match service.dispatch_request(spec.route, spec.payload, spec.priority) {
             Ok(receipts) => {
                 if let Some(adapter) = spec.on_response {
                     if receipts.is_empty() {
+                        complete_work_done(connection, work_done_handle);
                         let response = Response::new_err(
                             id,
                             ErrorCode::InternalError as i32,
@@ -597,9 +608,11 @@ fn handle_request(
                             adapter,
                             spec.response_context,
                             postprocess.clone(),
+                            work_done_handle,
                         );
                     }
                 } else {
+                    complete_work_done(connection, work_done_handle);
                     let response = Response::new_err(
                         id,
                         ErrorCode::InternalError as i32,
@@ -609,6 +622,7 @@ fn handle_request(
                 }
             }
             Err(err) => {
+                complete_work_done(connection, work_done_handle);
                 let response = Response::new_err(
                     id,
                     ErrorCode::InternalError as i32,
@@ -635,6 +649,11 @@ struct PendingRequests {
     entries: HashMap<PendingKey, PendingEntry>,
 }
 
+struct ResolveOutcome {
+    response: Option<Response>,
+    work_done: Option<WorkDoneHandle>,
+}
+
 impl PendingRequests {
     fn track(
         &mut self,
@@ -643,7 +662,9 @@ impl PendingRequests {
         adapter: ResponseAdapter,
         context: Option<Value>,
         postprocess: Option<PostProcess>,
+        work_done: Option<WorkDoneHandle>,
     ) {
+        let mut work_done_handle = work_done;
         for receipt in receipts {
             self.entries.insert(
                 PendingKey {
@@ -655,6 +676,7 @@ impl PendingRequests {
                     adapter,
                     context: context.clone(),
                     postprocess: postprocess.clone(),
+                    work_done: work_done_handle.take(),
                 },
             );
         }
@@ -666,7 +688,7 @@ impl PendingRequests {
         payload: &Value,
         inlay_cache: &mut InlayHintCache,
         service: &mut Service,
-    ) -> anyhow::Result<Option<Response>> {
+    ) -> anyhow::Result<Option<ResolveOutcome>> {
         if payload
             .get("type")
             .and_then(|kind| kind.as_str())
@@ -681,7 +703,7 @@ impl PendingRequests {
             None => return Ok(None),
         };
 
-        let entry = match self.entries.remove(&PendingKey {
+        let mut entry = match self.entries.remove(&PendingKey {
             server,
             seq: request_seq,
         }) {
@@ -689,6 +711,7 @@ impl PendingRequests {
             None => return Ok(None),
         };
 
+        let work_done = entry.work_done.take();
         let success = payload
             .get("success")
             .and_then(|value| value.as_bool())
@@ -700,18 +723,29 @@ impl PendingRequests {
                     if let Some(postprocess) = entry.postprocess {
                         postprocess.apply(&result, inlay_cache)?;
                     }
-                    Ok(Some(Response::new_ok(entry.id, result)))
+                    Ok(Some(ResolveOutcome {
+                        response: Some(Response::new_ok(entry.id, result)),
+                        work_done,
+                    }))
                 }
                 Ok(AdapterResult::Continue(next_spec)) => {
                     let request_id = entry.id;
                     let postprocess = entry.postprocess;
                     let Some(adapter) = next_spec.on_response else {
-                        return Ok(Some(Response::new_err(
-                            request_id,
-                            ErrorCode::InternalError as i32,
-                            "handler missing response adapter".to_string(),
-                        )));
+                        return Ok(Some(ResolveOutcome {
+                            response: Some(Response::new_err(
+                                request_id,
+                                ErrorCode::InternalError as i32,
+                                "handler missing response adapter".to_string(),
+                            )),
+                            work_done,
+                        }));
                     };
+                    if next_spec.work_done.is_some() {
+                        log::warn!(
+                            "continuation RequestSpec attempted to override work-done progress"
+                        );
+                    }
                     match service.dispatch_request(
                         next_spec.route,
                         next_spec.payload,
@@ -719,45 +753,57 @@ impl PendingRequests {
                     ) {
                         Ok(receipts) => {
                             if receipts.is_empty() {
-                                Ok(Some(Response::new_err(
-                                    request_id,
-                                    ErrorCode::InternalError as i32,
-                                    "tsserver route produced no requests".to_string(),
-                                )))
-                            } else {
-                                self.track(
-                                    &receipts,
-                                    request_id,
-                                    adapter,
-                                    next_spec.response_context,
-                                    postprocess,
-                                );
-                                Ok(None)
+                                return Ok(Some(ResolveOutcome {
+                                    response: Some(Response::new_err(
+                                        request_id,
+                                        ErrorCode::InternalError as i32,
+                                        "tsserver route produced no requests".to_string(),
+                                    )),
+                                    work_done,
+                                }));
                             }
+                            self.track(
+                                &receipts,
+                                request_id,
+                                adapter,
+                                next_spec.response_context,
+                                postprocess,
+                                work_done,
+                            );
+                            Ok(None)
                         }
-                        Err(err) => Ok(Some(Response::new_err(
-                            request_id,
-                            ErrorCode::InternalError as i32,
-                            format!("failed to dispatch tsserver request: {err}"),
-                        ))),
+                        Err(err) => Ok(Some(ResolveOutcome {
+                            response: Some(Response::new_err(
+                                request_id,
+                                ErrorCode::InternalError as i32,
+                                format!("failed to dispatch tsserver request: {err}"),
+                            )),
+                            work_done,
+                        })),
                     }
                 }
-                Err(err) => Ok(Some(Response::new_err(
-                    entry.id,
-                    ErrorCode::InternalError as i32,
-                    format!("failed to adapt tsserver response: {err}"),
-                ))),
+                Err(err) => Ok(Some(ResolveOutcome {
+                    response: Some(Response::new_err(
+                        entry.id,
+                        ErrorCode::InternalError as i32,
+                        format!("failed to adapt tsserver response: {err}"),
+                    )),
+                    work_done,
+                })),
             }
         } else {
             let message = payload
                 .get("message")
                 .and_then(|m| m.as_str())
                 .unwrap_or("tsserver request failed");
-            Ok(Some(Response::new_err(
-                entry.id,
-                ErrorCode::InternalError as i32,
-                message.to_string(),
-            )))
+            Ok(Some(ResolveOutcome {
+                response: Some(Response::new_err(
+                    entry.id,
+                    ErrorCode::InternalError as i32,
+                    message.to_string(),
+                )),
+                work_done,
+            }))
         }
     }
 }
@@ -773,11 +819,17 @@ struct PendingEntry {
     adapter: ResponseAdapter,
     context: Option<Value>,
     postprocess: Option<PostProcess>,
+    work_done: Option<WorkDoneHandle>,
 }
 
 #[derive(Clone)]
 enum PostProcess {
     InlayHints { key: HintCacheKey },
+}
+
+struct WorkDoneHandle {
+    token: ProgressToken,
+    done_message: String,
 }
 
 impl PostProcess {
@@ -1216,6 +1268,69 @@ impl LoadingProgress {
     }
 }
 
+fn begin_work_done(
+    connection: &Connection,
+    spec: &WorkDoneProgressSpec,
+) -> anyhow::Result<WorkDoneHandle> {
+    let token = request_progress_token(connection, spec.token.clone())?;
+    let params = ProgressParams {
+        token: token.clone(),
+        value: ProgressParamsValue::WorkDone(LspWorkDoneProgress::Begin(WorkDoneProgressBegin {
+            title: spec.title.clone(),
+            message: Some(spec.message.clone()),
+            ..WorkDoneProgressBegin::default()
+        })),
+    };
+    send_progress(connection, params)?;
+    Ok(WorkDoneHandle {
+        token,
+        done_message: spec.done_message.clone(),
+    })
+}
+
+fn finish_work_done(connection: &Connection, handle: WorkDoneHandle) -> anyhow::Result<()> {
+    let params = ProgressParams {
+        token: handle.token,
+        value: ProgressParamsValue::WorkDone(LspWorkDoneProgress::End(WorkDoneProgressEnd {
+            message: Some(handle.done_message),
+        })),
+    };
+    send_progress(connection, params)
+}
+
+fn complete_work_done(connection: &Connection, handle: Option<WorkDoneHandle>) {
+    if let Some(handle) = handle {
+        if let Err(err) = finish_work_done(connection, handle) {
+            log::debug!("work-done progress end failed: {err:?}");
+        }
+    }
+}
+
+fn request_progress_token(
+    connection: &Connection,
+    supplied: Option<ProgressToken>,
+) -> anyhow::Result<ProgressToken> {
+    if let Some(token) = supplied {
+        return Ok(token);
+    }
+    let token = next_progress_token();
+    let params = WorkDoneProgressCreateParams {
+        token: token.clone(),
+    };
+    let request = Request::new(
+        next_request_id(),
+        <WorkDoneProgressCreate as LspRequest>::METHOD.to_string(),
+        serde_json::to_value(params)?,
+    );
+    connection.sender.send(Message::Request(request))?;
+    Ok(token)
+}
+
+fn next_progress_token() -> ProgressToken {
+    let seq = WORK_DONE_TOKEN_SEQ.fetch_add(1, Ordering::Relaxed);
+    ProgressToken::String(format!("ts-bridge:workdone:{seq}"))
+}
+
 fn send_progress(connection: &Connection, params: ProgressParams) -> anyhow::Result<()> {
     let notif =
         ServerNotification::new(Progress::METHOD.to_string(), serde_json::to_value(params)?);
@@ -1224,6 +1339,7 @@ fn send_progress(connection: &Connection, params: ProgressParams) -> anyhow::Res
 }
 
 static SERVER_REQUEST_IDS: AtomicU64 = AtomicU64::new(1);
+static WORK_DONE_TOKEN_SEQ: AtomicU64 = AtomicU64::new(1);
 
 fn next_request_id() -> RequestId {
     let seq = SERVER_REQUEST_IDS.fetch_add(1, Ordering::Relaxed);

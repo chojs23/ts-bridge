@@ -49,6 +49,7 @@ pub fn handle(mut item: CompletionItem) -> Option<RequestSpec> {
         priority: Priority::Normal,
         on_response: Some(adapt_completion_resolve),
         response_context: Some(context),
+        work_done: None,
     })
 }
 

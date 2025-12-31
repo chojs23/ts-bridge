@@ -36,6 +36,7 @@ pub fn handle(params: lsp_types::HoverParams) -> RequestSpec {
         priority: Priority::Normal,
         on_response: Some(adapt_quickinfo),
         response_context: None,
+        work_done: None,
     }
 }
 

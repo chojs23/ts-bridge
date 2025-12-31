@@ -29,6 +29,7 @@ pub fn handle(params: DocumentSymbolParams) -> RequestSpec {
         priority: Priority::Normal,
         on_response: Some(adapt_document_symbols),
         response_context: None,
+        work_done: None,
     }
 }
 

@@ -11,15 +11,15 @@ use std::collections::{HashMap, VecDeque};
 
 use anyhow::{Context, Result};
 use lsp_types::{
-    ExecuteCommandParams, FileRename, GotoDefinitionParams, TextDocumentIdentifier,
-    TextDocumentPositionParams, Uri, WorkspaceEdit,
+    ExecuteCommandParams, FileRename, GotoDefinitionParams, ProgressToken, ReferenceContext,
+    ReferenceParams, TextDocumentIdentifier, TextDocumentPositionParams, Uri, WorkspaceEdit,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::protocol::text_document::code_action::workspace_edit_from_tsserver_changes;
 use crate::protocol::text_document::definition::{self, DefinitionContext, DefinitionParams};
-use crate::protocol::{AdapterResult, RequestSpec};
+use crate::protocol::{AdapterResult, RequestSpec, WorkDoneProgressSpec};
 use crate::rpc::{Priority, Route};
 use crate::utils::{tsserver_span_to_location, uri_to_file_path};
 
@@ -45,10 +45,14 @@ pub const USER_COMMANDS: &[&str] = &[
     "TSBGoToSourceDefinition",
     "TSBRenameFile",
     "TSBFileReferences",
+    "TSBSymbolReferences",
+    "TSBReloadProjects",
+    "TSBStatus",
 ];
 
 pub fn handle(params: ExecuteCommandParams) -> Option<RequestSpec> {
     let args = params.arguments;
+    let work_done_token = params.work_done_progress_params.work_done_token.clone();
     match params.command.as_str() {
         "TSBOrganizeImports" => organize_imports_command(&args, ORGANIZE_MODE_ALL),
         "TSBSortImports" => organize_imports_command(&args, ORGANIZE_MODE_SORT_AND_COMBINE),
@@ -59,6 +63,9 @@ pub fn handle(params: ExecuteCommandParams) -> Option<RequestSpec> {
         "TSBGoToSourceDefinition" => goto_source_definition_command(&args),
         "TSBRenameFile" => rename_file_command(&args),
         "TSBFileReferences" => file_references_command(&args),
+        "TSBSymbolReferences" => symbol_references_command(&args),
+        "TSBReloadProjects" => reload_projects_command(work_done_token.clone()),
+        "TSBStatus" => status_command(work_done_token),
         _ => None,
     }
 }
@@ -81,6 +88,7 @@ fn organize_imports_command(args: &[Value], mode: &str) -> Option<RequestSpec> {
         priority: Priority::Low,
         on_response: Some(adapt_file_code_edits),
         response_context: None,
+        work_done: None,
     })
 }
 
@@ -92,6 +100,7 @@ fn combined_code_fix_command(args: &[Value], fix_id: &str) -> Option<RequestSpec
         priority: Priority::Low,
         on_response: Some(adapt_combined_code_fix),
         response_context: None,
+        work_done: None,
     })
 }
 
@@ -112,6 +121,7 @@ fn fix_all_command(args: &[Value]) -> Option<RequestSpec> {
         priority: Priority::Low,
         on_response: Some(adapt_fix_all_chain),
         response_context: Some(context),
+        work_done: None,
     })
 }
 
@@ -147,6 +157,7 @@ fn rename_file_command(args: &[Value]) -> Option<RequestSpec> {
         priority: Priority::Low,
         on_response: Some(adapt_file_code_edits),
         response_context: None,
+        work_done: None,
     })
 }
 
@@ -163,6 +174,54 @@ fn file_references_command(args: &[Value]) -> Option<RequestSpec> {
         priority: Priority::Normal,
         on_response: Some(adapt_file_references),
         response_context: None,
+        work_done: None,
+    })
+}
+
+fn symbol_references_command(args: &[Value]) -> Option<RequestSpec> {
+    let params: TextDocumentPositionParams = serde_json::from_value(args.first()?.clone()).ok()?;
+    let reference_params = ReferenceParams {
+        text_document_position: params,
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+        context: ReferenceContext {
+            include_declaration: true,
+        },
+    };
+    Some(crate::protocol::text_document::references::handle(
+        reference_params,
+    ))
+}
+
+fn reload_projects_command(token: Option<ProgressToken>) -> Option<RequestSpec> {
+    Some(RequestSpec {
+        route: Route::Syntax,
+        payload: json!({ "command": "reloadProjects" }),
+        priority: Priority::Low,
+        on_response: Some(adapt_empty_response),
+        response_context: None,
+        work_done: Some(WorkDoneProgressSpec {
+            token,
+            title: "tsserver".into(),
+            message: "Reloading project graphs".into(),
+            done_message: "Project graphs refreshed".into(),
+        }),
+    })
+}
+
+fn status_command(token: Option<ProgressToken>) -> Option<RequestSpec> {
+    Some(RequestSpec {
+        route: Route::Syntax,
+        payload: json!({ "command": "status" }),
+        priority: Priority::Low,
+        on_response: Some(adapt_status_response),
+        response_context: None,
+        work_done: Some(WorkDoneProgressSpec {
+            token,
+            title: "tsserver".into(),
+            message: "Requesting status report".into(),
+            done_message: "Status report ready".into(),
+        }),
     })
 }
 
@@ -245,11 +304,21 @@ fn adapt_fix_all_chain(payload: &Value, context: Option<&Value>) -> Result<Adapt
             priority: Priority::Low,
             on_response: Some(adapt_fix_all_chain),
             response_context: Some(updated_context),
+            work_done: None,
         }));
     }
 
     let result = state.accumulated.unwrap_or_else(empty_workspace_edit);
     Ok(AdapterResult::ready(serde_json::to_value(result)?))
+}
+
+fn adapt_empty_response(_payload: &Value, _context: Option<&Value>) -> Result<AdapterResult> {
+    Ok(AdapterResult::ready(Value::Null))
+}
+
+fn adapt_status_response(payload: &Value, _context: Option<&Value>) -> Result<AdapterResult> {
+    let body = payload.get("body").cloned().unwrap_or(Value::Null);
+    Ok(AdapterResult::ready(body))
 }
 
 fn empty_workspace_edit() -> WorkspaceEdit {

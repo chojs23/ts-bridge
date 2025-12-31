@@ -49,6 +49,7 @@ fn build_fix_all_request(action: CodeAction, fix_all: FixAllData) -> Option<Requ
         priority: Priority::Low,
         on_response: Some(adapt_fix_all_response),
         response_context: Some(context),
+        work_done: None,
     })
 }
 
@@ -65,6 +66,7 @@ fn build_organize_imports_request(
         priority: Priority::Low,
         on_response: Some(adapt_organize_imports_response),
         response_context: Some(context),
+        work_done: None,
     })
 }
 

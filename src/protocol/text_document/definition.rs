@@ -66,6 +66,7 @@ pub fn handle(params: DefinitionParams) -> RequestSpec {
         priority: Priority::Normal,
         on_response: Some(adapt_definition),
         response_context: None,
+        work_done: None,
     }
 }
 

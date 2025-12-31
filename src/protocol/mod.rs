@@ -6,7 +6,9 @@
 //! implementation dynamically transformed method names into module paths; in
 //! Rust we will keep a static registry for clarity and compile-time checking.
 
-use lsp_types::{GotoDefinitionParams, TextDocumentPositionParams, request::Request};
+use lsp_types::{
+    GotoDefinitionParams, ProgressToken, TextDocumentPositionParams, request::Request,
+};
 use serde_json::Value;
 
 use crate::rpc::{Priority, Route};
@@ -35,6 +37,7 @@ pub struct RequestSpec {
     pub priority: Priority,
     pub on_response: Option<ResponseAdapter>,
     pub response_context: Option<Value>,
+    pub work_done: Option<WorkDoneProgressSpec>,
 }
 
 #[derive(Debug)]
@@ -42,6 +45,14 @@ pub struct NotificationSpec {
     pub route: Route,
     pub payload: Value,
     pub priority: Priority,
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkDoneProgressSpec {
+    pub token: Option<ProgressToken>,
+    pub title: String,
+    pub message: String,
+    pub done_message: String,
 }
 
 pub fn route_request(method: &str, params: Value) -> Option<RequestSpec> {

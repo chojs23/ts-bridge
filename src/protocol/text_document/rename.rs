@@ -49,6 +49,7 @@ pub fn handle_prepare(params: TextDocumentPositionParams) -> RequestSpec {
         priority: Priority::Normal,
         on_response: Some(adapt_prepare_rename),
         response_context: None,
+        work_done: None,
     }
 }
 
@@ -84,6 +85,7 @@ pub fn handle(params: RenameParams) -> RequestSpec {
         priority: Priority::Normal,
         on_response: Some(adapt_rename),
         response_context: Some(context),
+        work_done: None,
     }
 }
 
