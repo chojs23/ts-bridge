@@ -397,7 +397,11 @@ mod tests {
         let ctx_value = adapter_context(true);
 
         let adapted = adapt_code_actions(&payload, Some(&ctx_value)).expect("adapt");
-        let actions: Vec<_> = match serde_json::from_value::<CodeActionResponse>(adapted) {
+        let value = match adapted {
+            AdapterResult::Ready(value) => value,
+            AdapterResult::Continue(_) => panic!("expected ready code action response"),
+        };
+        let actions: Vec<_> = match serde_json::from_value::<CodeActionResponse>(value) {
             Ok(actions) => actions,
             Err(err) => panic!("failed to deserialize code action response: {err}"),
         };

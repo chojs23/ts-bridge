@@ -280,7 +280,11 @@ mod tests {
             }
         });
 
-        let value = adapt_semantic_tokens(&payload, None).expect("semantic tokens adapt");
+        let adapted = adapt_semantic_tokens(&payload, None).expect("semantic tokens adapt");
+        let value = match adapted {
+            AdapterResult::Ready(value) => value,
+            AdapterResult::Continue(_) => panic!("expected ready semantic tokens response"),
+        };
         let tokens: SemanticTokens =
             serde_json::from_value(value).expect("semantic tokens deserialize");
         assert_eq!(tokens.data.len(), 2);

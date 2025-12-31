@@ -312,7 +312,11 @@ mod tests {
             }
         });
 
-        let value = adapt_signature_help(&payload, None).expect("signature help adapts");
+        let adapted = adapt_signature_help(&payload, None).expect("signature help adapts");
+        let value = match adapted {
+            AdapterResult::Ready(value) => value,
+            AdapterResult::Continue(_) => panic!("expected ready signature help response"),
+        };
         let parsed: LspSignatureHelp =
             serde_json::from_value(value).expect("signature help deserializes");
         assert_eq!(parsed.signatures.len(), 1);

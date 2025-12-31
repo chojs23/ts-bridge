@@ -35,8 +35,12 @@ fn source_definition_locations_convert_to_location_links() {
         }]
     });
     let adapter = spec.on_response.expect("definition adapter present");
-    let value = adapter(&tsserver_payload, spec.response_context.as_ref())
+    let adapted = adapter(&tsserver_payload, spec.response_context.as_ref())
         .expect("definition adapter should convert response");
+    let value = match adapted {
+        protocol::AdapterResult::Ready(value) => value,
+        protocol::AdapterResult::Continue(_) => panic!("expected ready definition response"),
+    };
     match serde_json::from_value::<GotoDefinitionResponse>(value)
         .expect("adapter must emit a valid LSP response")
     {

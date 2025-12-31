@@ -182,7 +182,11 @@ mod tests {
             }
         });
 
-        let hover_value = adapt_quickinfo(&payload, None).expect("hover should adapt");
+        let adapted = adapt_quickinfo(&payload, None).expect("hover should adapt");
+        let hover_value = match adapted {
+            AdapterResult::Ready(value) => value,
+            AdapterResult::Continue(_) => panic!("expected ready hover response"),
+        };
         let hover: LspHover = serde_json::from_value(hover_value).expect("hover deserializes");
         let HoverContents::Markup(content) = hover.contents else {
             panic!("expected markup hover");

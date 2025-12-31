@@ -210,7 +210,11 @@ mod tests {
             }
         });
 
-        let value = adapt_definition(&payload, None).expect("definition should adapt");
+        let adapted = adapt_definition(&payload, None).expect("definition should adapt");
+        let value = match adapted {
+            AdapterResult::Ready(value) => value,
+            AdapterResult::Continue(_) => panic!("expected ready definition response"),
+        };
         match serde_json::from_value::<GotoDefinitionResponse>(value)
             .expect("response should deserialize")
         {
@@ -245,7 +249,11 @@ mod tests {
                 "end": { "line": 5, "offset": 7 }
             }]
         });
-        let value = adapt_definition(&payload, None).expect("source definition adapts");
+        let adapted = adapt_definition(&payload, None).expect("source definition adapts");
+        let value = match adapted {
+            AdapterResult::Ready(value) => value,
+            AdapterResult::Continue(_) => panic!("expected ready source definition response"),
+        };
         match serde_json::from_value::<GotoDefinitionResponse>(value)
             .expect("response should deserialize")
         {
