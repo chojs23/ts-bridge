@@ -1,8 +1,8 @@
 [package]
 name = "ts-bridge"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-description = "A Rust TypeScript language-server shim that bridges Neovim's LSP client with tsserver."
+description = "A TypeScript language-server shim that bridges Neovim's LSP client with tsserver."
 authors = ["Neo <chojs990222@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/chojs23/ts-bridge"
