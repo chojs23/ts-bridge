@@ -142,6 +142,8 @@ vim.lsp.config("ts_bridge", {
         global_plugins = {},
         plugin_probe_dirs = {},
         extra_args = {},
+        preferences = {},
+        format_options = {},
       },
     },
   },
@@ -149,6 +151,9 @@ vim.lsp.config("ts_bridge", {
 
 vim.lsp.enable("ts_bridge")
 ```
+
+`tsserver.preferences` and `tsserver.format_options` are forwarded to
+tsserver’s `configure` request (keys are passed through as-is).
 
 If you're using `nvim-lspconfig`, the equivalent registration is:
 
@@ -183,6 +188,8 @@ lspconfig.ts_bridge.setup({
         global_plugins = {},
         plugin_probe_dirs = {},
         extra_args = {},
+        preferences = {},
+        format_options = {},
       },
     },
   },
@@ -348,6 +355,8 @@ vim.lsp.config("ts_bridge", {
         global_plugins = {},
         plugin_probe_dirs = {},
         extra_args = {},
+        preferences = {},
+        format_options = {},
       },
     },
   },
@@ -377,6 +386,8 @@ if not configs.ts_bridge then
             global_plugins = {},
             plugin_probe_dirs = {},
             extra_args = {},
+            preferences = {},
+            format_options = {},
           },
         },
       },
