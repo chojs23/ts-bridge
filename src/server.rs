@@ -1012,6 +1012,7 @@ fn run_session(connection: Connection, registry: &ProjectRegistry) -> anyhow::Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lsp_types::{Uri, WorkspaceFolder};
 
     #[test]
     fn advertised_capabilities_include_inlay_hints_when_enabled() {
@@ -1043,6 +1044,188 @@ mod tests {
         assert!(
             caps.inlay_hint_provider.is_none(),
             "initialize must omit inlay hint capability when disabled"
+        );
+    }
+
+    #[test]
+    fn tsserver_configure_args_override_inlay_hint_preferences() {
+        let mut preferences = Map::new();
+        preferences.insert(
+            "includeInlayParameterNameHints".to_string(),
+            Value::String("literals".to_string()),
+        );
+        preferences.insert(
+            "quotePreference".to_string(),
+            Value::String("auto".to_string()),
+        );
+
+        let config = Config::new(PluginSettings {
+            enable_inlay_hints: false,
+            tsserver_preferences: preferences,
+            ..Default::default()
+        });
+
+        let args = tsserver_configure_args(&config);
+        let preferences = args
+            .get("preferences")
+            .and_then(|value| value.as_object())
+            .expect("configure args should include preferences");
+
+        assert_eq!(
+            preferences
+                .get("includeInlayParameterNameHints")
+                .and_then(|value| value.as_str()),
+            Some("none")
+        );
+        assert_eq!(
+            preferences
+                .get("quotePreference")
+                .and_then(|value| value.as_str()),
+            Some("auto")
+        );
+    }
+
+    #[test]
+    fn tsserver_configure_args_include_format_options_when_provided() {
+        let mut format_options = Map::new();
+        format_options.insert("indentSize".to_string(), Value::Number(2.into()));
+
+        let config = Config::new(PluginSettings {
+            tsserver_format_options: format_options,
+            ..Default::default()
+        });
+
+        let args = tsserver_configure_args(&config);
+        let format_options = args
+            .get("formatOptions")
+            .and_then(|value| value.as_object())
+            .expect("configure args should include formatOptions");
+
+        assert_eq!(
+            format_options
+                .get("indentSize")
+                .and_then(|value| value.as_i64()),
+            Some(2)
+        );
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn workspace_root_from_params_prefers_root_path() {
+        let params = InitializeParams {
+            root_path: Some("/tmp/root-path".to_string()),
+            root_uri: Some(Uri::from_str("file:///tmp/root-uri").expect("valid uri")),
+            workspace_folders: Some(vec![WorkspaceFolder {
+                uri: Uri::from_str("file:///tmp/workspace-root").expect("valid uri"),
+                name: "workspace".to_string(),
+            }]),
+            ..Default::default()
+        };
+
+        let root = workspace_root_from_params(&params);
+
+        assert_eq!(root, Some(PathBuf::from("/tmp/root-path")));
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn workspace_root_from_params_uses_root_uri_when_root_path_missing() {
+        let params = InitializeParams {
+            root_uri: Some(Uri::from_str("file:///tmp/root-uri").expect("valid uri")),
+            ..Default::default()
+        };
+
+        let root = workspace_root_from_params(&params);
+
+        assert_eq!(root, Some(PathBuf::from("/tmp/root-uri")));
+    }
+
+    #[test]
+    fn workspace_root_from_params_uses_first_workspace_folder_when_needed() {
+        let params = InitializeParams {
+            workspace_folders: Some(vec![WorkspaceFolder {
+                uri: Uri::from_str("file:///tmp/workspace-root").expect("valid uri"),
+                name: "workspace".to_string(),
+            }]),
+            ..Default::default()
+        };
+
+        let root = workspace_root_from_params(&params);
+
+        assert_eq!(root, Some(PathBuf::from("/tmp/workspace-root")));
+    }
+
+    #[test]
+    fn project_registry_status_snapshot_exposes_session_and_pid_details() {
+        let (tx, rx) = unbounded();
+        let last_used = Arc::new(AtomicU64::new(123));
+        let session_count = Arc::new(AtomicUsize::new(0));
+        let root = PathBuf::from("/tmp/status-project");
+
+        let handle = ProjectHandle {
+            root: root.clone(),
+            label: "project".to_string(),
+            commands: tx,
+            last_used: Arc::clone(&last_used),
+            session_count: Arc::clone(&session_count),
+        };
+
+        let entry = ProjectEntry {
+            handle,
+            last_used,
+            session_count,
+        };
+
+        let registry = ProjectRegistry {
+            inner: Arc::new(Mutex::new(ProjectRegistryState {
+                entries: HashMap::from([(root.clone(), entry)]),
+                max_entries: None,
+                idle_ttl: None,
+            })),
+        };
+
+        thread::spawn(move || {
+            if let Ok(command) = rx.recv() {
+                if let ProjectCommand::Status { reply } = command {
+                    let _ = reply.send(ProjectThreadStatus {
+                        session_count: 2,
+                        session_ids: vec![1, 2],
+                        tsserver_syntax_pid: Some(100),
+                        tsserver_semantic_pid: Some(200),
+                    });
+                }
+            }
+        });
+
+        let snapshot = registry.status_snapshot();
+
+        assert_eq!(snapshot.len(), 1);
+        let entry = snapshot
+            .first()
+            .and_then(|value| value.as_object())
+            .expect("status entry should be an object");
+        assert_eq!(entry.get("label").and_then(|v| v.as_str()), Some("project"));
+        assert_eq!(
+            entry.get("root").and_then(|v| v.as_str()),
+            Some("/tmp/status-project")
+        );
+        assert_eq!(entry.get("session_count").and_then(|v| v.as_u64()), Some(2));
+        assert_eq!(
+            entry.get("last_used_epoch_seconds")
+                .and_then(|v| v.as_u64()),
+            Some(123)
+        );
+        let tsserver = entry
+            .get("tsserver")
+            .and_then(|value| value.as_object())
+            .expect("status entry should include tsserver object");
+        assert_eq!(
+            tsserver.get("syntax_pid").and_then(|v| v.as_u64()),
+            Some(100)
+        );
+        assert_eq!(
+            tsserver.get("semantic_pid").and_then(|v| v.as_u64()),
+            Some(200)
         );
     }
 }

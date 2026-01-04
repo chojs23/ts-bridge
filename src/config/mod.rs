@@ -307,3 +307,72 @@ impl TsserverLogVerbosity {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn apply_workspace_settings_updates_tsserver_preferences_and_format_options() {
+        let mut config = Config::new(PluginSettings::default());
+        let settings = json!({
+            "ts-bridge": {
+                "tsserver": {
+                    "preferences": {
+                        "importModuleSpecifierPreference": "relative"
+                    },
+                    "format_options": {
+                        "indentSize": 4
+                    }
+                }
+            }
+        });
+
+        let changed = config.apply_workspace_settings(&settings);
+
+        assert!(changed);
+        assert_eq!(
+            config
+                .plugin()
+                .tsserver_preferences
+                .get("importModuleSpecifierPreference")
+                .and_then(|value| value.as_str()),
+            Some("relative")
+        );
+        assert_eq!(
+            config
+                .plugin()
+                .tsserver_format_options
+                .get("indentSize")
+                .and_then(|value| value.as_i64()),
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn apply_workspace_settings_accepts_format_options_camel_case() {
+        let mut config = Config::new(PluginSettings::default());
+        let settings = json!({
+            "ts-bridge": {
+                "tsserver": {
+                    "formatOptions": {
+                        "tabSize": 2
+                    }
+                }
+            }
+        });
+
+        let changed = config.apply_workspace_settings(&settings);
+
+        assert!(changed);
+        assert_eq!(
+            config
+                .plugin()
+                .tsserver_format_options
+                .get("tabSize")
+                .and_then(|value| value.as_i64()),
+            Some(2)
+        );
+    }
+}
