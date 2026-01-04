@@ -12,7 +12,7 @@ use serde_json::{Map, Value};
 
 /// Settings that are evaluated once during plugin setup (analogous to the Lua
 /// `settings` table).  Additional fields will be introduced as we port features.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PluginSettings {
     /// Whether we spin up a paired semantic tsserver dedicated to diagnostics.
     pub separate_diagnostic_server: bool,
@@ -21,6 +21,10 @@ pub struct PluginSettings {
     pub publish_diagnostic_on: DiagnosticPublishMode,
     /// Launch arguments and logging preferences forwarded to tsserver.
     pub tsserver: TsserverLaunchOptions,
+    /// User preferences forwarded to the tsserver `configure` command.
+    pub tsserver_preferences: Map<String, Value>,
+    /// Formatting options forwarded to the tsserver `configure` command.
+    pub tsserver_format_options: Map<String, Value>,
     /// Gate for tsserver-backed inlay hints; allows users to disable the feature entirely.
     pub enable_inlay_hints: bool,
 }
@@ -31,6 +35,8 @@ impl Default for PluginSettings {
             separate_diagnostic_server: true,
             publish_diagnostic_on: DiagnosticPublishMode::InsertLeave,
             tsserver: TsserverLaunchOptions::default(),
+            tsserver_preferences: Map::new(),
+            tsserver_format_options: Map::new(),
             enable_inlay_hints: true,
         }
     }
@@ -54,7 +60,7 @@ impl DiagnosticPublishMode {
 }
 
 /// Global configuration facade that exposes read-only handles to each settings struct.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Config {
     plugin: PluginSettings,
 }
@@ -123,6 +129,35 @@ impl PluginSettings {
 
         if let Some(tsserver) = map.get("tsserver") {
             changed |= self.tsserver.update_from_value(tsserver);
+            if let Some(tsserver_map) = tsserver.as_object() {
+                if tsserver_map.contains_key("preferences") {
+                    let next = tsserver_map
+                        .get("preferences")
+                        .and_then(|v| v.as_object())
+                        .cloned()
+                        .unwrap_or_default();
+                    if self.tsserver_preferences != next {
+                        self.tsserver_preferences = next;
+                        changed = true;
+                    }
+                }
+
+                let format_value = if tsserver_map.contains_key("format_options") {
+                    tsserver_map.get("format_options")
+                } else if tsserver_map.contains_key("formatOptions") {
+                    tsserver_map.get("formatOptions")
+                } else {
+                    None
+                };
+
+                if let Some(value) = format_value {
+                    let next = value.as_object().cloned().unwrap_or_default();
+                    if self.tsserver_format_options != next {
+                        self.tsserver_format_options = next;
+                        changed = true;
+                    }
+                }
+            }
         }
 
         if let Some(value) = map.get("enable_inlay_hints").and_then(|v| v.as_bool()) {

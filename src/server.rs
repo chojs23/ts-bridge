@@ -31,7 +31,7 @@ use lsp_types::{
         InlayHintRefreshRequest, InlayHintRequest, Request as LspRequest, WorkDoneProgressCreate,
     },
 };
-use serde_json::{self, Value, json};
+use serde_json::{self, Map, Value, json};
 
 use crate::config::{Config, PluginSettings};
 use crate::documents::{DocumentStore, OpenDocumentSnapshot, TextSpan};
@@ -1008,7 +1008,7 @@ struct SessionState {
     restart_progress: RestartProgress,
     documents: DocumentStore,
     inlay_cache: InlayHintCache,
-    inlay_preferences: InlayPreferenceState,
+    tsserver_configure: TsserverConfigureState,
 }
 
 impl SessionState {
@@ -1028,7 +1028,7 @@ impl SessionState {
             restart_progress: RestartProgress::new(init.session_id),
             documents: DocumentStore::default(),
             inlay_cache: InlayHintCache::default(),
-            inlay_preferences: InlayPreferenceState::default(),
+            tsserver_configure: TsserverConfigureState::default(),
         }
     }
 
@@ -1088,7 +1088,7 @@ impl SessionState {
             ProjectEvent::Server(event) => self.handle_server_event(event),
             ProjectEvent::ConfigUpdated(config) => {
                 self.config = config;
-                self.inlay_preferences.invalidate();
+                self.tsserver_configure.invalidate();
                 self.inlay_cache.clear();
                 Ok(())
             }
@@ -1183,6 +1183,9 @@ impl SessionState {
                 .unwrap_or_else(|| params.text_document.uri.to_string());
             let spec =
                 crate::protocol::text_document::did_open::handle(params, &self.workspace_root);
+            if let Err(err) = self.tsserver_configure.ensure(&self.config, &self.project) {
+                log::warn!("failed to configure tsserver: {err}");
+            }
             if let Err(err) = self
                 .project
                 .dispatch_request(spec.route, spec.payload, spec.priority)
@@ -1214,6 +1217,9 @@ impl SessionState {
                 .unwrap_or_else(|| params.text_document.uri.to_string());
             let spec =
                 crate::protocol::text_document::did_change::handle(params, &self.workspace_root);
+            if let Err(err) = self.tsserver_configure.ensure(&self.config, &self.project) {
+                log::warn!("failed to configure tsserver: {err}");
+            }
             if let Err(err) = self
                 .project
                 .dispatch_request(spec.route, spec.payload, spec.priority)
@@ -1241,6 +1247,9 @@ impl SessionState {
             }
             let spec =
                 crate::protocol::text_document::did_close::handle(params, &self.workspace_root);
+            if let Err(err) = self.tsserver_configure.ensure(&self.config, &self.project) {
+                log::warn!("failed to configure tsserver: {err}");
+            }
             if let Err(err) = self
                 .project
                 .dispatch_request(spec.route, spec.payload, spec.priority)
@@ -1257,12 +1266,15 @@ impl SessionState {
             self.config = update.config;
             if update.changed {
                 log::info!("workspace settings reloaded from didChangeConfiguration");
-                self.inlay_preferences.invalidate();
+                self.tsserver_configure.invalidate();
                 // TODO: restart auxiliary tsserver processes when toggles require it.
             }
             return Ok(false);
         }
         if let Some(spec) = protocol::route_notification(&notif.method, notif.params.clone()) {
+            if let Err(err) = self.tsserver_configure.ensure(&self.config, &self.project) {
+                log::warn!("failed to configure tsserver: {err}");
+            }
             if let Err(err) = self
                 .project
                 .dispatch_request(spec.route, spec.payload, spec.priority)
@@ -1349,7 +1361,6 @@ impl SessionState {
 
         if method == InlayHintRequest::METHOD {
             let enabled = self.config.plugin().enable_inlay_hints;
-            self.inlay_preferences.ensure(&self.config, &self.project)?;
             if !enabled {
                 let response = Response::new_ok(id, Value::Array(Vec::new()));
                 self.connection.sender.send(response.into())?;
@@ -1383,6 +1394,15 @@ impl SessionState {
         }
 
         if let Some(spec) = spec {
+            if let Err(err) = self.tsserver_configure.ensure(&self.config, &self.project) {
+                let response = Response::new_err(
+                    id,
+                    ErrorCode::InternalError as i32,
+                    format!("failed to configure tsserver: {err}"),
+                );
+                self.connection.sender.send(response.into())?;
+                return Ok(false);
+            }
             match self
                 .project
                 .dispatch_request(spec.route, spec.payload, spec.priority)
@@ -1493,7 +1513,7 @@ impl SessionState {
 
         self.diag_state.clear();
         self.inlay_cache.clear();
-        self.inlay_preferences.invalidate();
+        self.tsserver_configure.invalidate();
         if let Err(err) =
             self.restart_progress
                 .begin(&self.connection, "Restarting TypeScript server", kind)
@@ -1531,6 +1551,9 @@ impl SessionState {
 
     fn request_file_diagnostics(&mut self, file: &str) {
         let spec = protocol::diagnostics::request_for_file(file);
+        if let Err(err) = self.tsserver_configure.ensure(&self.config, &self.project) {
+            log::warn!("failed to configure tsserver: {err}");
+        }
         match self
             .project
             .dispatch_request(spec.route, spec.payload, spec.priority)
@@ -1565,6 +1588,9 @@ impl SessionState {
             },
         };
         let spec = crate::protocol::text_document::did_open::handle(params, &self.workspace_root);
+        if let Err(err) = self.tsserver_configure.ensure(&self.config, &self.project) {
+            log::warn!("failed to configure tsserver: {err}");
+        }
         if let Err(err) = self
             .project
             .dispatch_request(spec.route, spec.payload, spec.priority)
@@ -1848,37 +1874,55 @@ struct InlayHintCache {
 }
 
 #[derive(Default)]
-struct InlayPreferenceState {
-    configured_for: Option<bool>,
+struct TsserverConfigureState {
+    last_args: Option<Map<String, Value>>,
 }
 
-impl InlayPreferenceState {
+impl TsserverConfigureState {
     fn ensure(&mut self, config: &Config, project: &ProjectHandle) -> anyhow::Result<()> {
-        let desired = config.plugin().enable_inlay_hints;
-        if self.configured_for == Some(desired) {
+        let args = tsserver_configure_args(config);
+        if self.last_args.as_ref() == Some(&args) {
             return Ok(());
         }
-        self.dispatch(project, desired)?;
-        self.configured_for = Some(desired);
-        Ok(())
-    }
-
-    fn dispatch(&self, project: &ProjectHandle, enabled: bool) -> anyhow::Result<()> {
         let request = json!({
             "command": "configure",
-            "arguments": {
-                "preferences": crate::protocol::text_document::inlay_hint::preferences(enabled),
-            }
+            "arguments": args,
         });
         let _ = project
             .dispatch_request(Route::Both, request, Priority::Const)
             .context("failed to dispatch tsserver configure request")?;
+        self.last_args = Some(args);
         Ok(())
     }
 
     fn invalidate(&mut self) {
-        self.configured_for = None;
+        self.last_args = None;
     }
+}
+
+fn tsserver_configure_args(config: &Config) -> Map<String, Value> {
+    let mut args = Map::new();
+
+    // Merge user preferences with the inlay hint gate so `enable_inlay_hints`
+    // always wins for inlay-specific keys.
+    let mut preferences = config.plugin().tsserver_preferences.clone();
+    let inlay_preferences =
+        crate::protocol::text_document::inlay_hint::preferences(config.plugin().enable_inlay_hints);
+    if let Some(map) = inlay_preferences.as_object() {
+        for (key, value) in map {
+            preferences.insert(key.clone(), value.clone());
+        }
+    }
+    args.insert("preferences".to_string(), Value::Object(preferences));
+
+    if !config.plugin().tsserver_format_options.is_empty() {
+        args.insert(
+            "formatOptions".to_string(),
+            Value::Object(config.plugin().tsserver_format_options.clone()),
+        );
+    }
+
+    args
 }
 
 impl InlayHintCache {
