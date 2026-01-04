@@ -258,9 +258,11 @@ local function ensure_ts_bridge_daemon()
     "daemon",
     "--listen",
     "127.0.0.1:7007", -- choose your port
+    "--idle-ttl",
+    "30m",
   }, {
     detach = true,
-    env = { RUST_LOG = "info", TS_BRIDGE_DAEMON_IDLE_TTL = "30m" },
+    env = { RUST_LOG = "info" },
   })
 end
 
@@ -313,6 +315,9 @@ require("lspconfig").ts_bridge.setup({
 
 Note: `cmd_env` does not apply when using `vim.lsp.rpc.connect`, so any daemon
 settings and logging must be passed in the `jobstart` environment or CLI args.
+When launching with `ts-bridge daemon`, `TS_BRIDGE_DAEMON_*` environment values
+are not read; use `--idle-ttl` (and other flags) or run the env-only daemon mode
+(`TS_BRIDGE_DAEMON=1` without the `daemon` subcommand).
 
 ### Running the daemon manually
 
@@ -326,7 +331,8 @@ Optional knobs:
 - `--idle-ttl 1800` (seconds) or `--idle-ttl 30m` (suffix `s`, `m`, `h`)
 - `--idle-ttl off` to disable idle eviction
 
-Environment variable equivalents:
+Environment variable equivalents (only when running `ts-bridge` without args
+with `TS_BRIDGE_DAEMON=1`):
 
 - `TS_BRIDGE_DAEMON=1` to start daemon mode when running `ts-bridge` without args
 - `TS_BRIDGE_DAEMON_LISTEN=127.0.0.1:7007`
