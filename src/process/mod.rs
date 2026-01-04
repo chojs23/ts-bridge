@@ -168,12 +168,17 @@ impl TsserverProcess {
             .as_ref()
             .map(|handles| handles.response_rx.clone())
     }
+
+    pub fn pid(&self) -> Option<u32> {
+        self.child.as_ref().map(|handles| handles.child.id())
+    }
 }
 
 impl Drop for TsserverProcess {
     fn drop(&mut self) {
         if let Some(mut handles) = self.child.take() {
             let _ = handles.child.kill();
+            let _ = handles.child.wait();
         }
     }
 }
