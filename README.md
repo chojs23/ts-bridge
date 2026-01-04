@@ -37,7 +37,7 @@ cargo build --release
 ```
 
 The resulting binary (`target/release/ts-bridge`) can be pointed to from your
-Neovim `lspconfig` setup.
+Neovim LSP configuration (built-in `vim.lsp.config` or `nvim-lspconfig`).
 
 ## Downloading prebuilt binaries
 
@@ -122,9 +122,35 @@ verification.
 
 ## Configuration
 
-`ts-bridge` works out of the box, but here’s a minimal Neovim `lspconfig`
-snippet that wires the server up with all default options spelled out so you can
-override only what you need later:
+`ts-bridge` works out of the box. For Neovim 0.11+ (built-in LSP config), use:
+
+```lua
+vim.lsp.config("ts_bridge", {
+  cmd = { "ts-bridge" },
+  filetypes = { "typescript", "typescriptreact", "javascript", "javascriptreact" },
+  root_markers = { "tsconfig.json", "jsconfig.json", "package.json", ".git" },
+  settings = {
+    ["ts-bridge"] = {
+      separate_diagnostic_server = true,      -- launch syntax + semantic tsserver
+      publish_diagnostic_on = "insert_leave",
+      enable_inlay_hints = true,
+      tsserver = {
+        locale = nil,
+        log_directory = nil,
+        log_verbosity = nil,
+        max_old_space_size = nil,
+        global_plugins = {},
+        plugin_probe_dirs = {},
+        extra_args = {},
+      },
+    },
+  },
+})
+
+vim.lsp.enable("ts_bridge")
+```
+
+If you're using `nvim-lspconfig`, the equivalent registration is:
 
 ```lua
 local configs = require("lspconfig.configs")
@@ -231,6 +257,45 @@ local function ensure_ts_bridge_daemon()
   })
 end
 
+local function wait_for_daemon(host, port, timeout_ms)
+  local addr = string.format("%s:%d", host, port)
+  local function is_ready()
+    local ok, chan = pcall(vim.fn.sockconnect, "tcp", addr, { rpc = false })
+    if not ok then
+      return false
+    end
+    if type(chan) == "number" and chan > 0 then
+      vim.fn.chanclose(chan)
+      return true
+    end
+    return false
+  end
+  return vim.wait(timeout_ms, is_ready, 50)
+end
+
+local function daemon_cmd(dispatchers)
+  ensure_ts_bridge_daemon()
+  -- Built-in LSP has no `on_new_config`, and `before_init` runs after `cmd`, so
+  -- start + wait here to avoid a first-attach connection refusal.
+  wait_for_daemon("127.0.0.1", 7007, 2000)
+  return vim.lsp.rpc.connect("127.0.0.1", 7007)(dispatchers)
+end
+
+vim.lsp.config("ts_bridge", {
+  cmd = daemon_cmd,
+  filetypes = { "typescript", "typescriptreact", "javascript", "javascriptreact" },
+  root_markers = { "tsconfig.json", "jsconfig.json", "package.json", ".git" },
+})
+
+vim.lsp.enable("ts_bridge")
+```
+
+The `cmd` wrapper ensures the daemon is running before the TCP connection is
+attempted (since `before_init` runs after the transport is created).
+
+If you're using `nvim-lspconfig`, use:
+
+```lua
 require("lspconfig").ts_bridge.setup({
   cmd = vim.lsp.rpc.connect("127.0.0.1", 7007),
   on_new_config = function()
@@ -266,8 +331,32 @@ their `tsserver` processes are shut down once they exceed the TTL.
 
 ### Neovim (daemon connection)
 
-When connecting to a daemon, use `vim.lsp.rpc.connect` and register the custom
-server config with `nvim-lspconfig`:
+When connecting to a running daemon, use `vim.lsp.rpc.connect` and register the custom
+server config:
+
+```lua
+vim.lsp.config("ts_bridge", {
+  cmd = vim.lsp.rpc.connect("127.0.0.1", 7007),  -- match daemon address
+  filetypes = { "typescript", "typescriptreact", "javascript", "javascriptreact" },
+  root_markers = { "tsconfig.json", "jsconfig.json", "package.json", ".git" },
+  settings = {
+    ["ts-bridge"] = {
+      separate_diagnostic_server = true,
+      publish_diagnostic_on = "insert_leave",
+      enable_inlay_hints = true,
+      tsserver = {
+        global_plugins = {},
+        plugin_probe_dirs = {},
+        extra_args = {},
+      },
+    },
+  },
+})
+
+vim.lsp.enable("ts_bridge")
+```
+
+If you're using `nvim-lspconfig` instead of the built-in config, use:
 
 ```lua
 local configs = require("lspconfig.configs")
