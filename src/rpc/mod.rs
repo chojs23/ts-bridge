@@ -200,6 +200,19 @@ impl Service {
     pub fn config_mut(&mut self) -> &mut Config {
         &mut self.config
     }
+
+    pub fn tsserver_status(&self) -> TsserverStatus {
+        TsserverStatus {
+            syntax_pid: self.syntax.as_ref().and_then(|process| process.pid()),
+            semantic_pid: self.semantic.as_ref().and_then(|process| process.pid()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TsserverStatus {
+    pub syntax_pid: Option<u32>,
+    pub semantic_pid: Option<u32>,
 }
 
 #[derive(thiserror::Error, Debug)]

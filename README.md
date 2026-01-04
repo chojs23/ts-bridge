@@ -401,6 +401,24 @@ require("lspconfig").ts_bridge.setup({})
 Daemon settings (listen address, idle TTL, etc.) must be configured on the
 daemon process itself; they are not part of LSP `settings`.
 
+### Daemon status request
+
+To inspect the daemon’s current projects and sessions, send the custom LSP
+request `ts-bridge/status` from any connected client:
+
+```lua
+vim.lsp.buf_request(0, "ts-bridge/status", {}, function(err, result)
+  if err then
+    vim.notify(vim.inspect(err), vim.log.levels.ERROR)
+    return
+  end
+  print(vim.inspect(result))
+end)
+```
+
+The response includes a `projects` array with fields such as `root`,
+`session_count`, `session_ids`, `last_used_epoch_seconds`, and tsserver PIDs.
+
 ## Contributing
 
 Every contributions are welcome! Feel free to open issues or submit pull
