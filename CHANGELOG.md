@@ -6,6 +6,15 @@ All notable changes to this project will be documented in this file. The format 
 
 - Placeholder for upcoming changes.
 
+## [0.2.2] - 2026-01-04
+
+### Added
+- Added a `ts-bridge/status` request for inspecting daemon projects, sessions, and tsserver PIDs.
+- Added test coverage for tsserver configure argument construction, workspace root selection, and status snapshots.
+
+### Fixed
+- Ensure `tsserver` child processes are waited after shutdown to avoid zombie instances.
+
 ## [0.2.1] - 2026-01-04
 
 ### Added
