@@ -1181,16 +1181,14 @@ impl SessionState {
             }
             let file_for_diagnostics = uri_to_file_path(params.text_document.uri.as_str())
                 .unwrap_or_else(|| params.text_document.uri.to_string());
-            let spec = crate::protocol::text_document::did_open::handle(
-                params,
-                &self.workspace_root,
-            );
+            let spec =
+                crate::protocol::text_document::did_open::handle(params, &self.workspace_root);
             if let Err(err) = self.tsserver_configure.ensure(&self.config, &self.project) {
                 log::warn!("failed to configure tsserver: {err}");
             }
-            if let Err(err) =
-                self.project
-                    .dispatch_request(spec.route, spec.payload, spec.priority)
+            if let Err(err) = self
+                .project
+                .dispatch_request(spec.route, spec.payload, spec.priority)
             {
                 log::warn!("failed to dispatch didOpen: {err}");
             }
@@ -1217,16 +1215,14 @@ impl SessionState {
             }
             let file_for_diagnostics = uri_to_file_path(params.text_document.uri.as_str())
                 .unwrap_or_else(|| params.text_document.uri.to_string());
-            let spec = crate::protocol::text_document::did_change::handle(
-                params,
-                &self.workspace_root,
-            );
+            let spec =
+                crate::protocol::text_document::did_change::handle(params, &self.workspace_root);
             if let Err(err) = self.tsserver_configure.ensure(&self.config, &self.project) {
                 log::warn!("failed to configure tsserver: {err}");
             }
-            if let Err(err) =
-                self.project
-                    .dispatch_request(spec.route, spec.payload, spec.priority)
+            if let Err(err) = self
+                .project
+                .dispatch_request(spec.route, spec.payload, spec.priority)
             {
                 log::warn!("failed to dispatch didChange: {err}");
             }
@@ -1249,16 +1245,14 @@ impl SessionState {
                 self.inlay_cache.invalidate(&parsed);
                 self.diag_state.clear_file(&parsed);
             }
-            let spec = crate::protocol::text_document::did_close::handle(
-                params,
-                &self.workspace_root,
-            );
+            let spec =
+                crate::protocol::text_document::did_close::handle(params, &self.workspace_root);
             if let Err(err) = self.tsserver_configure.ensure(&self.config, &self.project) {
                 log::warn!("failed to configure tsserver: {err}");
             }
-            if let Err(err) =
-                self.project
-                    .dispatch_request(spec.route, spec.payload, spec.priority)
+            if let Err(err) = self
+                .project
+                .dispatch_request(spec.route, spec.payload, spec.priority)
             {
                 log::warn!("failed to dispatch didClose: {err}");
             }
@@ -1277,14 +1271,13 @@ impl SessionState {
             }
             return Ok(false);
         }
-        if let Some(spec) = protocol::route_notification(&notif.method, notif.params.clone())
-        {
+        if let Some(spec) = protocol::route_notification(&notif.method, notif.params.clone()) {
             if let Err(err) = self.tsserver_configure.ensure(&self.config, &self.project) {
                 log::warn!("failed to configure tsserver: {err}");
             }
-            if let Err(err) =
-                self.project
-                    .dispatch_request(spec.route, spec.payload, spec.priority)
+            if let Err(err) = self
+                .project
+                .dispatch_request(spec.route, spec.payload, spec.priority)
             {
                 log::warn!("failed to dispatch notification {}: {err}", notif.method);
             }
@@ -1521,11 +1514,10 @@ impl SessionState {
         self.diag_state.clear();
         self.inlay_cache.clear();
         self.tsserver_configure.invalidate();
-        if let Err(err) = self.restart_progress.begin(
-            &self.connection,
-            "Restarting TypeScript server",
-            kind,
-        ) {
+        if let Err(err) =
+            self.restart_progress
+                .begin(&self.connection, "Restarting TypeScript server", kind)
+        {
             log::debug!("restart progress begin failed: {err:?}");
         }
         Ok(())
@@ -1595,16 +1587,13 @@ impl SessionState {
                 text: snapshot.text,
             },
         };
-        let spec = crate::protocol::text_document::did_open::handle(
-            params,
-            &self.workspace_root,
-        );
+        let spec = crate::protocol::text_document::did_open::handle(params, &self.workspace_root);
         if let Err(err) = self.tsserver_configure.ensure(&self.config, &self.project) {
             log::warn!("failed to configure tsserver: {err}");
         }
-        if let Err(err) =
-            self.project
-                .dispatch_request(spec.route, spec.payload, spec.priority)
+        if let Err(err) = self
+            .project
+            .dispatch_request(spec.route, spec.payload, spec.priority)
         {
             log::warn!("failed to dispatch reopened didOpen: {err}");
             return Ok(());
@@ -1917,9 +1906,8 @@ fn tsserver_configure_args(config: &Config) -> Map<String, Value> {
     // Merge user preferences with the inlay hint gate so `enable_inlay_hints`
     // always wins for inlay-specific keys.
     let mut preferences = config.plugin().tsserver_preferences.clone();
-    let inlay_preferences = crate::protocol::text_document::inlay_hint::preferences(
-        config.plugin().enable_inlay_hints,
-    );
+    let inlay_preferences =
+        crate::protocol::text_document::inlay_hint::preferences(config.plugin().enable_inlay_hints);
     if let Some(map) = inlay_preferences.as_object() {
         for (key, value) in map {
             preferences.insert(key.clone(), value.clone());
