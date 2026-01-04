@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file. The format 
 
 - Placeholder for upcoming changes.
 
+## [0.2.1] - 2026-01-04
+
+### Added
+- Forward `tsserver.preferences` and `tsserver.format_options` through the `configure` request.
+- Added a PR CI workflow with `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, and a Rust cache.
+
+### Changed
+- Ensure `configure` is sent before routing tsserver-bound requests/notifications to keep preferences in sync.
+- Expanded README configuration examples for Neovim’s built-in LSP and daemon wait logic.
+
 ## [0.2.0] - 2025-12-31
 
 ### Added
