@@ -21,6 +21,8 @@ pub struct PluginSettings {
     pub publish_diagnostic_on: DiagnosticPublishMode,
     /// Launch arguments and logging preferences forwarded to tsserver.
     pub tsserver: TsserverLaunchOptions,
+    /// Possible user alias for tsserver binary
+    pub tsserver_cmd: String,
     /// User preferences forwarded to the tsserver `configure` command.
     pub tsserver_preferences: Map<String, Value>,
     /// Formatting options forwarded to the tsserver `configure` command.
@@ -35,6 +37,7 @@ impl Default for PluginSettings {
             separate_diagnostic_server: true,
             publish_diagnostic_on: DiagnosticPublishMode::InsertLeave,
             tsserver: TsserverLaunchOptions::default(),
+            tsserver_cmd: String::from("tsserver"),
             tsserver_preferences: Map::new(),
             tsserver_format_options: Map::new(),
             enable_inlay_hints: true,
@@ -126,6 +129,14 @@ impl PluginSettings {
                 changed = true;
             }
         }
+
+        if let Some(value) = map.get("tsserver_cmd").and_then(|v| v.as_str()) {
+            if self.tsserver_cmd != value {
+                self.tsserver_cmd = String::from(value);
+                changed = true;
+            }
+        }
+
 
         if let Some(tsserver) = map.get("tsserver") {
             changed |= self.tsserver.update_from_value(tsserver);

@@ -45,7 +45,8 @@ impl Service {
 
     /// Bootstraps tsserver processes once
     pub fn start(&mut self) -> Result<(), ServiceError> {
-        let binary = self.provider.resolve().map_err(ServiceError::Provider)?;
+        let tsserver_cmd = &self.config.plugin().tsserver_cmd;
+        let binary = self.provider.resolve(tsserver_cmd).map_err(ServiceError::Provider)?;
         let launch = self.config.plugin().tsserver.clone();
         let mut syntax = TsserverProcess::new(ServerKind::Syntax, binary.clone(), launch.clone());
         syntax.start().map_err(ServiceError::Process)?;

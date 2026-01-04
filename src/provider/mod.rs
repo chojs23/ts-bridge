@@ -63,7 +63,7 @@ impl Provider {
     /// 1. `node_modules/typescript/lib/tsserver.js` in workspace ancestors.
     /// 2. `.yarn/sdks/typescript/lib/tsserver.js` in ancestors.
     /// 3. `tsserver` on PATH (via `which`).
-    pub fn resolve(&mut self) -> Result<TsserverBinary, ProviderError> {
+    pub fn resolve(&mut self, cmd: &str) -> Result<TsserverBinary, ProviderError> {
         if let Some(path) = self.find_local_node_modules() {
             self.reanchor_workspace_root(&path);
             let plugin_probe = path
@@ -92,7 +92,7 @@ impl Provider {
             ));
         }
 
-        if let Some(path) = self.find_global_tsserver()? {
+        if let Some(path) = self.find_global_tsserver(cmd)? {
             return Ok(TsserverBinary::new(path, None, BinarySource::GlobalPath));
         }
 
@@ -129,8 +129,8 @@ impl Provider {
         })
     }
 
-    fn find_global_tsserver(&self) -> Result<Option<PathBuf>, ProviderError> {
-        match which::which("tsserver") {
+    fn find_global_tsserver(&self, cmd: &str) -> Result<Option<PathBuf>, ProviderError> {
+        match which::which(cmd) {
             Ok(path) => {
                 // Some distributions expose a wrapper script; if so try to backtrack to the JS file.
                 if path.file_name().and_then(|f| f.to_str()) == Some("tsserver.js") {
