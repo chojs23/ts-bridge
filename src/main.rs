@@ -38,8 +38,8 @@ fn daemon_config_from_env() -> anyhow::Result<Option<ts_bridge::DaemonConfig>> {
         config.socket = Some(socket.into());
     }
     if let Ok(idle_ttl) = std::env::var("TS_BRIDGE_DAEMON_IDLE_TTL") {
-        config.idle_ttl = parse_idle_ttl(&idle_ttl)
-            .with_context(|| "parse TS_BRIDGE_DAEMON_IDLE_TTL")?;
+        config.idle_ttl =
+            parse_idle_ttl(&idle_ttl).with_context(|| "parse TS_BRIDGE_DAEMON_IDLE_TTL")?;
     }
     Ok(Some(config))
 }
@@ -66,9 +66,9 @@ fn parse_idle_ttl(value: &str) -> anyhow::Result<Option<std::time::Duration>> {
         Some('h') => (&trimmed[..trimmed.len() - 1], 3600),
         _ => (trimmed, 1),
     };
-    let amount: u64 = number.parse().with_context(|| {
-        "daemon idle TTL must be a number of seconds or use s/m/h suffix"
-    })?;
+    let amount: u64 = number
+        .parse()
+        .with_context(|| "daemon idle TTL must be a number of seconds or use s/m/h suffix")?;
     let seconds = amount.saturating_mul(unit);
     Ok(Some(std::time::Duration::from_secs(seconds)))
 }
@@ -96,8 +96,7 @@ where
                 let value = args
                     .next()
                     .ok_or_else(|| anyhow::anyhow!("--idle-ttl requires SECONDS|off"))?;
-                config.idle_ttl = parse_idle_ttl(&value)
-                    .with_context(|| "parse --idle-ttl")?;
+                config.idle_ttl = parse_idle_ttl(&value).with_context(|| "parse --idle-ttl")?;
             }
             "-h" | "--help" => {
                 print_daemon_usage();

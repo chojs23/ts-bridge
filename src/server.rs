@@ -175,13 +175,17 @@ fn run_daemon_unix(socket_path: PathBuf, registry: ProjectRegistry) -> anyhow::R
 
 #[cfg(not(unix))]
 fn run_daemon_unix(_socket_path: PathBuf, _registry: ProjectRegistry) -> anyhow::Result<()> {
-    Err(anyhow!("unix domain sockets are not supported on this platform"))
+    Err(anyhow!(
+        "unix domain sockets are not supported on this platform"
+    ))
 }
 
 fn run_stream_session(stream: TcpStream, registry: ProjectRegistry) -> anyhow::Result<()> {
     let (connection, io_threads) = connection_from_stream(stream)?;
     run_session(connection, &registry)?;
-    io_threads.join().context("daemon session IO threads failed")?;
+    io_threads
+        .join()
+        .context("daemon session IO threads failed")?;
     Ok(())
 }
 
@@ -192,7 +196,9 @@ fn run_unix_stream_session(
 ) -> anyhow::Result<()> {
     let (connection, io_threads) = connection_from_stream(stream)?;
     run_session(connection, &registry)?;
-    io_threads.join().context("daemon session IO threads failed")?;
+    io_threads
+        .join()
+        .context("daemon session IO threads failed")?;
     Ok(())
 }
 
@@ -335,10 +341,7 @@ impl ProjectRegistry {
         config: Config,
     ) -> anyhow::Result<ProjectHandle> {
         let normalized = normalize_root(workspace_root);
-        let mut guard = self
-            .inner
-            .lock()
-            .expect("project registry mutex poisoned");
+        let mut guard = self.inner.lock().expect("project registry mutex poisoned");
         guard.maybe_evict();
         if let Some(entry) = guard.entries.get_mut(&normalized) {
             entry.touch();
@@ -366,10 +369,7 @@ impl ProjectRegistry {
 
     fn spawn_eviction_loop(&self) {
         let idle_ttl = {
-            let guard = self
-                .inner
-                .lock()
-                .expect("project registry mutex poisoned");
+            let guard = self.inner.lock().expect("project registry mutex poisoned");
             guard.idle_ttl
         };
         let Some(idle_ttl) = idle_ttl else {
@@ -386,10 +386,7 @@ impl ProjectRegistry {
         let sweep_interval = idle_sweep_interval(idle_ttl);
         loop {
             thread::sleep(sweep_interval);
-            let mut guard = self
-                .inner
-                .lock()
-                .expect("project registry mutex poisoned");
+            let mut guard = self.inner.lock().expect("project registry mutex poisoned");
             guard.maybe_evict();
         }
     }
@@ -454,7 +451,10 @@ impl ProjectRegistryState {
             .map(|(root, entry)| (entry.last_used.load(Ordering::Relaxed), root.clone()))
             .collect::<Vec<_>>();
         candidates.sort_by_key(|(last_used, _)| *last_used);
-        for (_, root) in candidates.into_iter().take(self.entries.len() - max_entries) {
+        for (_, root) in candidates
+            .into_iter()
+            .take(self.entries.len() - max_entries)
+        {
             if let Some(entry) = self.entries.remove(&root) {
                 entry.handle.shutdown();
             }
@@ -564,7 +564,10 @@ impl ProjectHandle {
         self.touch();
         let (reply_tx, reply_rx) = bounded(0);
         self.commands
-            .send(ProjectCommand::Restart { kind, reply: reply_tx })
+            .send(ProjectCommand::Restart {
+                kind,
+                reply: reply_tx,
+            })
             .context("dispatch project restart")?;
         reply_rx
             .recv()
@@ -598,11 +601,7 @@ impl ProjectHandle {
         let previous = self
             .session_count
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
-                if value == 0 {
-                    None
-                } else {
-                    Some(value - 1)
-                }
+                if value == 0 { None } else { Some(value - 1) }
             })
             .unwrap_or(0);
         if previous == 1 {
@@ -725,23 +724,11 @@ fn project_thread(config: Config, provider: Provider, label: String, rx: Receive
             Err(RecvTimeoutError::Disconnected) => break,
         };
 
-        if !handle_project_command(
-            command,
-            &mut service,
-            &mut config,
-            &mut sessions,
-            &label,
-        ) {
+        if !handle_project_command(command, &mut service, &mut config, &mut sessions, &label) {
             break;
         }
         while let Ok(command) = rx.try_recv() {
-            if !handle_project_command(
-                command,
-                &mut service,
-                &mut config,
-                &mut sessions,
-                &label,
-            ) {
+            if !handle_project_command(command, &mut service, &mut config, &mut sessions, &label) {
                 return;
             }
         }
@@ -940,9 +927,7 @@ fn run_session(connection: Connection, registry: &ProjectRegistry) -> anyhow::Re
 
     let mut session = SessionState::new(connection, session_init);
     let result = session.run();
-    session
-        .project
-        .unregister_session(session.session_id);
+    session.project.unregister_session(session.session_id);
     result
 }
 
@@ -1142,10 +1127,11 @@ impl SessionState {
                 } else {
                     format!("Analyzing {}", self.project_label)
                 };
-                if let Err(err) =
-                    self.progress
-                        .report(&self.connection, &message, self.diag_state.progress_percent())
-                {
+                if let Err(err) = self.progress.report(
+                    &self.connection,
+                    &message,
+                    self.diag_state.progress_percent(),
+                ) {
                     log::debug!("work-done progress report failed: {err:?}");
                 }
             } else {
@@ -1160,10 +1146,12 @@ impl SessionState {
             return Ok(());
         }
 
-        if let Some(response) =
-            self.pending
-                .resolve(event.server, &event.payload, &mut self.inlay_cache, &self.project)?
-        {
+        if let Some(response) = self.pending.resolve(
+            event.server,
+            &event.payload,
+            &mut self.inlay_cache,
+            &self.project,
+        )? {
             self.connection.sender.send(response.into())?;
         } else {
             log::trace!("tsserver {:?} -> {}", event.server, event.payload);
@@ -1171,10 +1159,7 @@ impl SessionState {
         Ok(())
     }
 
-    fn handle_notification(
-        &mut self,
-        notif: ServerNotification,
-    ) -> anyhow::Result<bool> {
+    fn handle_notification(&mut self, notif: ServerNotification) -> anyhow::Result<bool> {
         if notif.method == "exit" {
             return Ok(true);
         }
@@ -1196,13 +1181,11 @@ impl SessionState {
             }
             let file_for_diagnostics = uri_to_file_path(params.text_document.uri.as_str())
                 .unwrap_or_else(|| params.text_document.uri.to_string());
-            let spec = crate::protocol::text_document::did_open::handle(
-                params,
-                &self.workspace_root,
-            );
-            if let Err(err) =
-                self.project
-                    .dispatch_request(spec.route, spec.payload, spec.priority)
+            let spec =
+                crate::protocol::text_document::did_open::handle(params, &self.workspace_root);
+            if let Err(err) = self
+                .project
+                .dispatch_request(spec.route, spec.payload, spec.priority)
             {
                 log::warn!("failed to dispatch didOpen: {err}");
             }
@@ -1229,13 +1212,11 @@ impl SessionState {
             }
             let file_for_diagnostics = uri_to_file_path(params.text_document.uri.as_str())
                 .unwrap_or_else(|| params.text_document.uri.to_string());
-            let spec = crate::protocol::text_document::did_change::handle(
-                params,
-                &self.workspace_root,
-            );
-            if let Err(err) =
-                self.project
-                    .dispatch_request(spec.route, spec.payload, spec.priority)
+            let spec =
+                crate::protocol::text_document::did_change::handle(params, &self.workspace_root);
+            if let Err(err) = self
+                .project
+                .dispatch_request(spec.route, spec.payload, spec.priority)
             {
                 log::warn!("failed to dispatch didChange: {err}");
             }
@@ -1258,13 +1239,11 @@ impl SessionState {
                 self.inlay_cache.invalidate(&parsed);
                 self.diag_state.clear_file(&parsed);
             }
-            let spec = crate::protocol::text_document::did_close::handle(
-                params,
-                &self.workspace_root,
-            );
-            if let Err(err) =
-                self.project
-                    .dispatch_request(spec.route, spec.payload, spec.priority)
+            let spec =
+                crate::protocol::text_document::did_close::handle(params, &self.workspace_root);
+            if let Err(err) = self
+                .project
+                .dispatch_request(spec.route, spec.payload, spec.priority)
             {
                 log::warn!("failed to dispatch didClose: {err}");
             }
@@ -1283,11 +1262,10 @@ impl SessionState {
             }
             return Ok(false);
         }
-        if let Some(spec) = protocol::route_notification(&notif.method, notif.params.clone())
-        {
-            if let Err(err) =
-                self.project
-                    .dispatch_request(spec.route, spec.payload, spec.priority)
+        if let Some(spec) = protocol::route_notification(&notif.method, notif.params.clone()) {
+            if let Err(err) = self
+                .project
+                .dispatch_request(spec.route, spec.payload, spec.priority)
             {
                 log::warn!("failed to dispatch notification {}: {err}", notif.method);
             }
@@ -1307,19 +1285,19 @@ impl SessionState {
             return Ok(());
         }
 
-            let restart = match parse_restart_request(Some(&params)) {
-                Ok(restart) => restart,
-                Err(err) => {
-                    log::warn!("control restart params invalid: {err}");
-                    return Ok(());
-                }
-            };
+        let restart = match parse_restart_request(Some(&params)) {
+            Ok(restart) => restart,
+            Err(err) => {
+                log::warn!("control restart params invalid: {err}");
+                return Ok(());
+            }
+        };
         if let Some(root_uri) = &restart.root_uri {
             if !self.matches_root_uri(root_uri) {
-                    log::warn!(
-                        "restart request ignored for non-matching root {}",
-                        root_uri.as_str()
-                    );
+                log::warn!(
+                    "restart request ignored for non-matching root {}",
+                    root_uri.as_str()
+                );
                 return Ok(());
             }
         }
@@ -1358,8 +1336,7 @@ impl SessionState {
 
         if method == lsp_types::request::ExecuteCommand::METHOD {
             let command_params: lsp_types::ExecuteCommandParams =
-                serde_json::from_value(params.clone())
-                    .context("invalid execute command params")?;
+                serde_json::from_value(params.clone()).context("invalid execute command params")?;
             if command_params.command == "TSBRestartProject" {
                 self.handle_restart_command(id, command_params)?;
                 return Ok(false);
@@ -1464,27 +1441,24 @@ impl SessionState {
         id: RequestId,
         params: lsp_types::ExecuteCommandParams,
     ) -> anyhow::Result<()> {
-            let restart = match parse_restart_request(params.arguments.first()) {
-                Ok(restart) => restart,
-                Err(err) => {
-                    let response = Response::new_err(
-                        id,
-                        ErrorCode::InvalidParams as i32,
-                        format!("invalid restart command arguments: {err}"),
-                    );
-                    self.connection.sender.send(response.into())?;
-                    return Ok(());
-                }
-            };
+        let restart = match parse_restart_request(params.arguments.first()) {
+            Ok(restart) => restart,
+            Err(err) => {
+                let response = Response::new_err(
+                    id,
+                    ErrorCode::InvalidParams as i32,
+                    format!("invalid restart command arguments: {err}"),
+                );
+                self.connection.sender.send(response.into())?;
+                return Ok(());
+            }
+        };
         if let Some(root_uri) = &restart.root_uri {
             if !self.matches_root_uri(root_uri) {
                 let response = Response::new_err(
                     id,
                     ErrorCode::InvalidParams as i32,
-                        format!(
-                            "rootUri {} does not match this session",
-                            root_uri.as_str()
-                        ),
+                    format!("rootUri {} does not match this session", root_uri.as_str()),
                 );
                 self.connection.sender.send(response.into())?;
                 return Ok(());
@@ -1520,11 +1494,10 @@ impl SessionState {
         self.diag_state.clear();
         self.inlay_cache.clear();
         self.inlay_preferences.invalidate();
-        if let Err(err) = self.restart_progress.begin(
-            &self.connection,
-            "Restarting TypeScript server",
-            kind,
-        ) {
+        if let Err(err) =
+            self.restart_progress
+                .begin(&self.connection, "Restarting TypeScript server", kind)
+        {
             log::debug!("restart progress begin failed: {err:?}");
         }
         Ok(())
@@ -1532,22 +1505,20 @@ impl SessionState {
 
     fn handle_restart_complete(&mut self, kind: RestartKind) -> anyhow::Result<()> {
         self.reopen_documents()?;
-        if let Err(err) = self.restart_progress.end(
-            &self.connection,
-            "TypeScript server restarted",
-            kind,
-        ) {
+        if let Err(err) =
+            self.restart_progress
+                .end(&self.connection, "TypeScript server restarted", kind)
+        {
             log::debug!("restart progress end failed: {err:?}");
         }
         Ok(())
     }
 
     fn handle_restart_failure(&mut self, kind: RestartKind, message: &str) -> anyhow::Result<()> {
-        if let Err(err) = self.restart_progress.end(
-            &self.connection,
-            "TypeScript server restart failed",
-            kind,
-        ) {
+        if let Err(err) =
+            self.restart_progress
+                .end(&self.connection, "TypeScript server restart failed", kind)
+        {
             log::debug!("restart progress end failed: {err:?}");
         }
         show_message(
@@ -1593,19 +1564,15 @@ impl SessionState {
                 text: snapshot.text,
             },
         };
-        let spec = crate::protocol::text_document::did_open::handle(
-            params,
-            &self.workspace_root,
-        );
-        if let Err(err) =
-            self.project
-                .dispatch_request(spec.route, spec.payload, spec.priority)
+        let spec = crate::protocol::text_document::did_open::handle(params, &self.workspace_root);
+        if let Err(err) = self
+            .project
+            .dispatch_request(spec.route, spec.payload, spec.priority)
         {
             log::warn!("failed to dispatch reopened didOpen: {err}");
             return Ok(());
         }
-        let file_for_diagnostics =
-            uri_to_file_path(snapshot.uri.as_str()).unwrap_or(snapshot.uri);
+        let file_for_diagnostics = uri_to_file_path(snapshot.uri.as_str()).unwrap_or(snapshot.uri);
         self.request_file_diagnostics(&file_for_diagnostics);
         Ok(())
     }
@@ -2225,10 +2192,7 @@ struct LoadingProgress {
 
 impl LoadingProgress {
     fn new(session_id: SessionId) -> Self {
-        let token = ProgressToken::String(format!(
-            "ts-bridge:{}:{session_id}",
-            std::process::id()
-        ));
+        let token = ProgressToken::String(format!("ts-bridge:{}:{session_id}", std::process::id()));
         Self {
             token,
             created: false,
