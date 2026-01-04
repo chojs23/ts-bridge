@@ -313,6 +313,54 @@ impl ProjectRegistry {
         registry
     }
 
+    fn status_snapshot(&self) -> Vec<Value> {
+        let seeds = {
+            let guard = self.inner.lock().expect("project registry mutex poisoned");
+            guard
+                .entries
+                .iter()
+                .map(|(root, entry)| {
+                    (
+                        root.clone(),
+                        entry.handle.label().to_string(),
+                        entry.handle.clone(),
+                        entry.last_used.load(Ordering::Relaxed),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let mut entries = Vec::with_capacity(seeds.len());
+        for (root, label, handle, last_used) in seeds {
+            let status = handle.status().unwrap_or_else(|err| {
+                log::warn!(
+                    "failed to fetch status for project {}: {err}",
+                    root.display()
+                );
+                ProjectThreadStatus::default()
+            });
+            entries.push(json!({
+                "root": root.to_string_lossy(),
+                "label": label,
+                "session_count": status.session_count,
+                "session_ids": status.session_ids,
+                "last_used_epoch_seconds": last_used,
+                "tsserver": {
+                    "syntax_pid": status.tsserver_syntax_pid,
+                    "semantic_pid": status.tsserver_semantic_pid,
+                },
+            }));
+        }
+        entries.sort_by_key(|entry| {
+            entry
+                .get("root")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string()
+        });
+        entries
+    }
+
     fn register_session(&self, params: &InitializeParams) -> anyhow::Result<SessionInit> {
         let workspace_root =
             workspace_root_from_params(params).unwrap_or_else(|| std::env::current_dir().unwrap());
@@ -579,6 +627,14 @@ impl ProjectHandle {
         let _ = self.commands.send(ProjectCommand::Shutdown);
     }
 
+    fn status(&self) -> anyhow::Result<ProjectThreadStatus> {
+        let (reply_tx, reply_rx) = bounded(0);
+        self.commands
+            .send(ProjectCommand::Status { reply: reply_tx })
+            .context("dispatch project status request")?;
+        reply_rx.recv().context("receive project status")
+    }
+
     fn root(&self) -> &Path {
         &self.root
     }
@@ -627,6 +683,14 @@ struct SessionRegistration {
 struct ConfigUpdate {
     changed: bool,
     config: Config,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ProjectThreadStatus {
+    session_count: usize,
+    session_ids: Vec<SessionId>,
+    tsserver_syntax_pid: Option<u32>,
+    tsserver_semantic_pid: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -696,6 +760,9 @@ enum ProjectCommand {
         kind: RestartKind,
         reply: Sender<Result<(), ServiceError>>,
     },
+    Status {
+        reply: Sender<ProjectThreadStatus>,
+    },
     Shutdown,
 }
 
@@ -712,7 +779,6 @@ fn project_thread(config: Config, provider: Provider, label: String, rx: Receive
     let mut config = config;
     let mut sessions: HashMap<SessionId, Sender<ProjectEvent>> = HashMap::new();
     let poll_interval = Duration::from_millis(10);
-
     loop {
         for event in service.poll_responses() {
             broadcast_event(&mut sessions, ProjectEvent::Server(event));
@@ -800,6 +866,18 @@ fn handle_project_command(
                 ),
             }
             let _ = reply.send(result);
+            true
+        }
+        ProjectCommand::Status { reply } => {
+            let status = service.tsserver_status();
+            let mut session_ids = sessions.keys().copied().collect::<Vec<_>>();
+            session_ids.sort_unstable();
+            let _ = reply.send(ProjectThreadStatus {
+                session_count: session_ids.len(),
+                session_ids,
+                tsserver_syntax_pid: status.syntax_pid,
+                tsserver_semantic_pid: status.semantic_pid,
+            });
             true
         }
         ProjectCommand::Shutdown => {
@@ -925,7 +1003,7 @@ fn run_session(connection: Connection, registry: &ProjectRegistry) -> anyhow::Re
         .initialize_finish(init_id, serde_json::to_value(init_result)?)
         .context("failed to send initialize result")?;
 
-    let mut session = SessionState::new(connection, session_init);
+    let mut session = SessionState::new(connection, session_init, registry.clone());
     let result = session.run();
     session.project.unregister_session(session.session_id);
     result
@@ -1009,10 +1087,11 @@ struct SessionState {
     documents: DocumentStore,
     inlay_cache: InlayHintCache,
     tsserver_configure: TsserverConfigureState,
+    registry: ProjectRegistry,
 }
 
 impl SessionState {
-    fn new(connection: Connection, init: SessionInit) -> Self {
+    fn new(connection: Connection, init: SessionInit, registry: ProjectRegistry) -> Self {
         let project_label = init.project.label().to_string();
         Self {
             connection,
@@ -1029,6 +1108,7 @@ impl SessionState {
             documents: DocumentStore::default(),
             inlay_cache: InlayHintCache::default(),
             tsserver_configure: TsserverConfigureState::default(),
+            registry,
         }
     }
 
@@ -1335,6 +1415,13 @@ impl SessionState {
                 ErrorCode::InvalidRequest as i32,
                 "initialize already completed".to_string(),
             );
+            self.connection.sender.send(response.into())?;
+            return Ok(false);
+        }
+
+        if method == "ts-bridge/status" {
+            let projects = self.registry.status_snapshot();
+            let response = Response::new_ok(id, json!({ "projects": projects }));
             self.connection.sender.send(response.into())?;
             return Ok(false);
         }
