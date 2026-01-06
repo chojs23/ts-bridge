@@ -11,8 +11,9 @@ documentation = "https://github.com/chojs23/ts-bridge"
 readme = "README.md"
 keywords = ["typescript", "language-server", "lsp", "bridge", "development"]
 categories = [
-  "development-tools::language-servers",
-  "programming-languages::typescript",
+  "development-tools",
+  "command-line-interface",
+  "command-line-utilities",
 ]
 
 [dependencies]
