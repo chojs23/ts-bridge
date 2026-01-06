@@ -1211,7 +1211,8 @@ mod tests {
         );
         assert_eq!(entry.get("session_count").and_then(|v| v.as_u64()), Some(2));
         assert_eq!(
-            entry.get("last_used_epoch_seconds")
+            entry
+                .get("last_used_epoch_seconds")
                 .and_then(|v| v.as_u64()),
             Some(123)
         );

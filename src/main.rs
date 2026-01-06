@@ -14,6 +14,10 @@ fn main() -> anyhow::Result<()> {
             let config = parse_daemon_args(args)?;
             ts_bridge::run_daemon_server(config)
         }
+        "-V" | "--version" => {
+            print_version();
+            Ok(())
+        }
         "-h" | "--help" => {
             print_usage();
             Ok(())
@@ -130,4 +134,8 @@ fn print_daemon_usage() {
     eprintln!(
         "Usage:\n  ts-bridge daemon [--listen HOST:PORT] [--socket PATH] [--idle-ttl SECONDS|off]\n"
     );
+}
+
+fn print_version() {
+    println!("ts-bridge {}", env!("CARGO_PKG_VERSION"));
 }

@@ -285,3 +285,115 @@ pub struct OpenDocumentSnapshot {
     pub version: Option<i32>,
     pub language_id: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{
+        Position as PluginPosition, Range as PluginRange, TextDocumentContentChangeEvent,
+    };
+    use lsp_types::{Position as LspPosition, Range as LspRange};
+    use std::str::FromStr;
+
+    fn sample_uri() -> Uri {
+        Uri::from_str("file:///workspace/main.ts").expect("valid URI")
+    }
+
+    #[test]
+    fn span_for_range_accounts_for_previous_lines() {
+        let mut store = DocumentStore::default();
+        let uri = sample_uri();
+        store.open(&uri, "ab\ncd", Some(1), Some("typescript".into()));
+
+        let range = LspRange {
+            start: LspPosition {
+                line: 1,
+                character: 0,
+            },
+            end: LspPosition {
+                line: 1,
+                character: 1,
+            },
+        };
+        let span = store
+            .span_for_range(&uri, &range)
+            .expect("document should be open");
+        assert_eq!(span.start, 3, "start must include prior line and newline");
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn apply_changes_updates_snapshot_and_offsets() {
+        let mut store = DocumentStore::default();
+        let uri = sample_uri();
+        store.open(&uri, "const value = 1;", Some(1), Some("typescript".into()));
+
+        let change = TextDocumentContentChangeEvent {
+            range: Some(PluginRange {
+                start: PluginPosition {
+                    line: 0,
+                    character: 6,
+                },
+                end: PluginPosition {
+                    line: 0,
+                    character: 11,
+                },
+            }),
+            text: "answer".into(),
+        };
+        store.apply_changes(&uri, &[change], Some(2));
+
+        let snapshot = store
+            .open_documents()
+            .into_iter()
+            .find(|doc| doc.uri == uri.to_string())
+            .expect("snapshot present");
+        assert_eq!(snapshot.text, "const answer = 1;");
+        assert_eq!(snapshot.version, Some(2));
+
+        let highlight_range = LspRange {
+            start: LspPosition {
+                line: 0,
+                character: 6,
+            },
+            end: LspPosition {
+                line: 0,
+                character: 12,
+            },
+        };
+        let span = store
+            .span_for_range(&uri, &highlight_range)
+            .expect("span available after edit");
+        assert_eq!(span.start, 6);
+        assert_eq!(span.length, 6);
+    }
+
+    #[test]
+    fn closing_document_drops_snapshot() {
+        let mut store = DocumentStore::default();
+        let uri = sample_uri();
+        store.open(&uri, "let a = 1;\n", Some(1), Some("typescript".into()));
+        assert!(store.is_open(&uri));
+
+        store.close(&uri);
+        assert!(!store.is_open(&uri));
+        let range = LspRange {
+            start: LspPosition {
+                line: 0,
+                character: 0,
+            },
+            end: LspPosition {
+                line: 0,
+                character: 1,
+            },
+        };
+        assert!(
+            store.span_for_range(&uri, &range).is_none(),
+            "span lookups should fail after close"
+        );
+        assert!(
+            store.open_documents().is_empty(),
+            "close removes snapshot entirely"
+        );
+    }
+}
