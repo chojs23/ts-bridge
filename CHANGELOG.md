@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file. The format 
 
 - Placeholder for upcoming changes.
 
+## [0.2.3] - 2026-01-06
+
+### Added
+- Added `--version`/`-V` CLI support so `ts-bridge` prints its crate version without starting the LSP server.
+- Introduced an integration test (`tests/version_cli.rs`) that spawns the binary via `assert_cmd` to guard the version flag end-to-end.
+- Expanded `DocumentStore` unit coverage (range/span accounting, change application, close semantics) to harden LSP ↔ tsserver text conversions.
+
+### Changed
+- Bumped README/agent docs to clarify contributor workflows and emphasize logging incidental bugs in `SESSION.md`.
+
 ## [0.2.2] - 2026-01-04
 
 ### Added
