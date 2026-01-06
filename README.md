@@ -43,6 +43,22 @@ Neovim LSP configuration (built-in `vim.lsp.config` or `nvim-lspconfig`).
 
 Get the latest release artifact from the [GitHub Releases](https://github.com/chojs23/ts-bridge/releases) page.
 
+## Install via Cargo
+
+If you already have Rust installed, the quickest path is:
+
+```bash
+cargo install ts-bridge --locked
+```
+
+Pin a specific version (for reproducible environments) by passing `--version`:
+
+```bash
+cargo install ts-bridge --locked --version 0.2.3
+```
+
+The binary will be placed in Cargo's `bin` directory (typically `~/.cargo/bin`); ensure that directory is inside your `PATH`.
+
 ## Install script (Linux/macOS)
 
 The install script downloads the latest release archive from GitHub and places
