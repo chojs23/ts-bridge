@@ -134,6 +134,9 @@ vim.lsp.config("ts_bridge", {
       separate_diagnostic_server = true,      -- launch syntax + semantic tsserver
       publish_diagnostic_on = "insert_leave",
       enable_inlay_hints = true,
+      -- if you've aliased 'tsserver' or would like to refer to a
+      -- different path, assign that to `tsserver_cmd`
+      -- tsserver_cmd = 'tsserver'
       tsserver = {
         locale = nil,
         log_directory = nil,
@@ -198,6 +201,10 @@ lspconfig.ts_bridge.setup({
 
 If you built locally instead of installing, swap `cmd = { "ts-bridge" }` for the
 absolute binary path (for example, `cmd = { "/path/to/ts-bridge" }`).
+
+In case you'd like to use a different path for `tsserver`, or refer to an
+alias, assign such to the `tsserver_cmd` field in the top-level settings
+table for `ts-bridge`.
 
 Because `ts-bridge` delays spawning `tsserver` until the first routed request,
 these defaults (or any overrides you make) apply to both syntax and semantic
